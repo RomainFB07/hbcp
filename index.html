@@ -549,6 +549,14 @@ function renderCompte(){
   }
 
   /* ---- mon solde ---- */
+  const dNow = new Date();
+  const jour = dNow.getDate(), mois = dNow.getMonth();
+  const moisPrec = MOIS_LONG[(mois+11)%12];
+  const moisCour = MOIS_LONG[mois];
+  const moisSuiv = MOIS_LONG[(mois+1)%12];
+  const deadlineTxt = jour <= 10
+    ? `📆 Le solde de <b>${moisPrec}</b> est à régler <b>avant le 10 ${moisCour}</b>. Passé ce délai : majoration de 2 €.`
+    : `📆 Le solde de <b>${moisCour}</b> sera à régler <b>avant le 10 ${moisSuiv}</b>. Retard = majoration de 2 €.`;
   const s = solde(AUTH.id);
   const pend = paiements.find(p=>p.joueur_id===AUTH.id && p.statut==="pending");
   out += `
@@ -567,8 +575,7 @@ function renderCompte(){
       </div>
     </div>
     <div class="empty" style="margin-bottom:12px">
-      📆 Le solde de chaque mois est à régler <b>avant le 10 du mois suivant</b>.
-      Passé ce délai : majoration de 2 €.
+      ${deadlineTxt}
     </div>`;
 
   /* ---- mes tables de marque ---- */
