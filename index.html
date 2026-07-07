@@ -78,12 +78,20 @@
   .menu-item .badge{background:var(--bleu-pale);color:var(--bleu-fonce);font-size:11px;border-radius:999px;padding:1px 7px}
   .menu-item.on .badge{background:#fff;color:var(--bleu)}
 
-  /* ---- menu hamburger + tiroir latéral ---- */
-  .hamb{position:fixed;top:12px;left:12px;z-index:46;width:46px;height:46px;
-    border:0;border-radius:13px;background:var(--bleu);cursor:pointer;
+  /* ---- menu hamburger + tiroir latéral ----
+     (sélecteurs .main-nav .xxx pour prendre le dessus sur .main-nav button) */
+  .main-nav .hamb{position:fixed;top:12px;left:12px;z-index:46;width:46px;height:46px;
+    border:0;border-radius:13px;background:var(--bleu);cursor:pointer;padding:0;
     display:flex;flex-direction:column;justify-content:center;align-items:center;gap:4.5px;
     box-shadow:0 3px 14px rgba(4,95,159,.35)}
-  .hamb span{display:block;width:19px;height:2.6px;background:#fff;border-radius:2px}
+  .main-nav .hamb span{display:block;width:19px;height:2.6px;background:#fff;border-radius:2px}
+  .main-nav .menu-item{display:flex;align-items:center;justify-content:space-between;width:100%;
+    border:0;background:none;text-align:left;font-family:'Archivo';font-weight:600;
+    font-size:14px;color:var(--txt);padding:11px 12px;border-radius:9px;cursor:pointer;box-shadow:none}
+  .main-nav .menu-item:hover{background:var(--bleu-pale)}
+  .main-nav .menu-item.on{background:var(--bleu);border-color:var(--bleu);color:#fff}
+  .main-nav .menu-item .badge{background:var(--bleu-pale);color:var(--bleu-fonce)}
+  .main-nav .menu-item.on .badge{background:#fff;color:var(--bleu)}
   .drawer-bg{position:fixed;inset:0;background:rgba(9,34,54,.5);z-index:47;display:none}
   .drawer-bg.open{display:block}
   .drawer{position:fixed;top:0;left:-300px;bottom:0;width:274px;background:var(--paper);
