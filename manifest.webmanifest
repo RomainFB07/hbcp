@@ -1,0 +1,14 @@
+{
+  "name": "La Caisse Noire — HBC du Pilat",
+  "short_name": "Caisse Noire",
+  "description": "Amendes, matchs et apéros du Handball Club du Pilat",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#eef4fa",
+  "theme_color": "#0480d8",
+  "icons": [
+    { "src": "./icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "./icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}
