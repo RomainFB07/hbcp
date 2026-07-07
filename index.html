@@ -37,8 +37,8 @@
   body{font-family:'Archivo',system-ui,sans-serif;background:var(--bg);color:var(--txt);min-height:100vh;padding-bottom:70px}
   .wrap{max-width:520px;margin:0 auto;padding:0 16px}
 
-  header{padding:20px 0 10px;text-align:center}
-  .head-row{display:flex;align-items:center;gap:10px;margin-bottom:9px;padding-left:58px}
+  header.wrap{padding:20px 16px 12px;text-align:center}
+  .head-row{position:relative;display:flex;align-items:center;gap:10px;margin-top:20px;margin-bottom:9px;padding-left:58px}
   .head-titles{text-align:left;min-width:0}
   .logo{width:54px;height:54px;object-fit:contain;display:block;flex:none;filter:drop-shadow(0 2px 6px rgba(4,95,159,.25))}
   .club{font-size:9.5px;letter-spacing:.13em;text-transform:uppercase;color:var(--bleu-fonce);font-weight:700}
@@ -82,10 +82,11 @@
 
   /* ---- menu hamburger + tiroir latéral ----
      (sélecteurs .main-nav .xxx pour prendre le dessus sur .main-nav button) */
-  .hamb{position:fixed;top:24px;left:12px;z-index:46;flex:none;width:46px;height:46px;
+  .hamb{position:absolute;left:0;top:50%;transform:translateY(-50%);z-index:46;flex:none;width:46px;height:46px;
     border:0;border-radius:13px;background:var(--bleu);cursor:pointer;padding:0;
     display:none;flex-direction:column;justify-content:center;align-items:center;gap:4.5px;
     box-shadow:0 3px 14px rgba(4,95,159,.35)}
+  .hamb.floating{position:fixed;top:12px;left:12px;transform:none}
   .hamb span{display:block;width:19px;height:2.6px;background:#fff;border-radius:2px}
   .main-nav .menu-item{display:flex;align-items:center;justify-content:space-between;width:100%;
     border:0;background:none;text-align:left;font-family:'Archivo';font-weight:600;
@@ -401,7 +402,7 @@ function render(){
   mn.innerHTML = `
     <div class="drawer-bg" id="drawerBg" onclick="closeMenu()"></div>
     <div class="drawer" id="drawer">
-      <div class="d-brand"><b>HBC PILAT SG</b><span>La Caisse Noire · Saison 2026-27</span></div>
+      <div class="d-brand"><b>HBC PILAT SG</b><span>La Caisse Noire · Saison 2026-27 · v2.1</span></div>
       ${VIEWS.map(v=>`<button class="menu-item ${v.id===view?'on':''}" onclick="setView('${v.id}')">
         <span>${v.label}</span>${v.badge?`<span class="badge">${v.badge}</span>`:""}</button>`).join("")}
     </div>
@@ -1336,6 +1337,9 @@ function closeMenu(){
   document.getElementById("drawer")?.classList.remove("open");
   document.getElementById("drawerBg")?.classList.remove("open");
 }
+window.addEventListener("scroll", ()=>{
+  document.getElementById("hambBtn")?.classList.toggle("floating", window.scrollY > 70);
+});
 let toastTimer;
 function toast(msg){
   const t=document.getElementById("toast");
