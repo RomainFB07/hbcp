@@ -986,7 +986,8 @@ function renderMatchs(){
 }
 function matchCard(m){
   const f = fmtDate(m.date_match);
-  const del = isGest() ? `<button class="m-del" onclick="delMatch('${m.id}')">supprimer</button>` : "";
+  const del = isGest() ? `<button class="m-del" style="color:var(--bleu)" onclick="editMatch('${m.id}')">modifier</button>
+    <button class="m-del" onclick="delMatch('${m.id}')">supprimer</button>` : "";
   return `<div class="match">
     <div class="m-head">
       <div class="m-date"><b>${f.jour}</b><span>${f.mois}</span></div>
@@ -1098,6 +1099,32 @@ async function addMatch(){
   if(rpcError(error)) return;
   await loadAll(); render();
   toast(`Match vs ${adv} ajouté ✓`);
+}
+function editMatch(id){
+  const m = matchs.find(x=>x.id===id); if(!m) return;
+  openSheet(`
+    <h3>Modifier le match</h3>
+    <p class="sub">${m.domicile?"vs":"@"} ${esc(m.adversaire)} · ${esc(m.equipes?.nom||"")}</p>
+    <div class="field-row">
+      <div class="field"><label>Nouvelle date</label>
+        <input id="fEditDate" type="date" value="${m.date_match}"></div>
+      <div class="field"><label>Nouvelle heure</label>
+        <input id="fEditHeure" type="time" value="${(m.heure||"20:30").slice(0,5)}"></div>
+    </div>
+    <button class="btn btn-ok btn-full" onclick="saveMatch('${m.id}')">Enregistrer</button>
+    <div class="empty" style="margin-top:12px">Les inscriptions au casse-croûte sont conservées.</div>`);
+}
+async function saveMatch(id){
+  const date = document.getElementById("fEditDate").value;
+  const heure = document.getElementById("fEditHeure").value;
+  if(!date || !heure){ toast("Date et heure obligatoires !"); return; }
+  const {error} = await db.rpc("modifier_match", {
+    p_token:AUTH.token, p_id:id, p_date:date, p_heure:heure
+  });
+  closeModal();
+  if(rpcError(error)) return;
+  await loadAll(); render();
+  toast("Match modifié ✓");
 }
 async function delMatch(id){
   const m = matchs.find(x=>x.id===id);
