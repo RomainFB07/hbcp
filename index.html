@@ -403,7 +403,7 @@ function render(){
   mn.innerHTML = `
     <div class="drawer-bg" id="drawerBg" onclick="closeMenu()"></div>
     <div class="drawer" id="drawer">
-      <div class="d-brand"><b>HBC PILAT SG</b><span>La Caisse Noire · Saison 2026-27 · v2.3</span></div>
+      <div class="d-brand"><b>HBC PILAT SG</b><span>La Caisse Noire · Saison 2026-27 · v2.4</span></div>
       ${VIEWS.map(v=>`<button class="menu-item ${v.id===view?'on':''}" onclick="setView('${v.id}')">
         <span>${v.label}</span>${v.badge?`<span class="badge">${v.badge}</span>`:""}</button>`).join("")}
       <div style="border-top:1.5px solid var(--line);margin-top:10px;padding-top:8px">
@@ -596,6 +596,7 @@ function renderCompte(){
   const moisPrec = MOIS_LONG[(mois+11)%12];
   const moisCour = MOIS_LONG[mois];
   const moisSuiv = MOIS_LONG[(mois+1)%12];
+  const cotisMontant = (bareme.find(b=>(b.motif||"").startsWith("Achat fûts"))||{}).montant ?? 3;
   const deadlineTxt = jour <= 10
     ? `📆 Le solde de <b>${moisPrec}</b> est à régler <b>avant le 10 ${moisCour}</b>. Passé ce délai : majoration de 2 €.`
     : `📆 Le solde de <b>${moisCour}</b> sera à régler <b>avant le 10 ${moisSuiv}</b>. Retard = majoration de 2 €.`;
@@ -622,7 +623,7 @@ function renderCompte(){
     </div>
     <div class="empty" style="margin-bottom:12px">
       ${deadlineTxt}<br>
-      🍺 Chaque 1er du mois : cotisation « Achat fûts de bière » ajoutée automatiquement au solde de chacun.
+      🍺 Chaque 1er du mois : cotisation de ${cotisMontant} € obligatoire pour « Achat fûts de bière », ajoutée automatiquement au solde de chacun.
     </div>`;
 
   /* ---- mes engagements récompensés ---- */
