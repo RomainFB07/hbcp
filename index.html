@@ -268,6 +268,7 @@ const PAY_CONFIG = {
   paypalUser: "romainfb",
 };
 const CREDIT_TABLE = 2;   // € de réduction par table de marque validée
+const VAPID_PUBLIC_KEY = "BPVFcXTkm9V68j15928aLbit_WyFK7qNHHwyf6J3Fcm89iIJNlGKy2nRN3qFh5ELZAEkTgOEWq5BkZBW4w1A7vE";
 /* ===================================================================== */
 
 const db = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -402,11 +403,15 @@ function render(){
   mn.innerHTML = `
     <div class="drawer-bg" id="drawerBg" onclick="closeMenu()"></div>
     <div class="drawer" id="drawer">
-      <div class="d-brand"><b>HBC PILAT SG</b><span>La Caisse Noire · Saison 2026-27 · v2.1</span></div>
+      <div class="d-brand"><b>HBC PILAT SG</b><span>La Caisse Noire · Saison 2026-27 · v2.3</span></div>
       ${VIEWS.map(v=>`<button class="menu-item ${v.id===view?'on':''}" onclick="setView('${v.id}')">
         <span>${v.label}</span>${v.badge?`<span class="badge">${v.badge}</span>`:""}</button>`).join("")}
+      <div style="border-top:1.5px solid var(--line);margin-top:10px;padding-top:8px">
+        <button class="menu-item" id="pushBtn" onclick="togglePush()">🔔 Activer les notifications</button>
+      </div>
     </div>
     <div class="menu-current">${cur.label}${cur.badge?` <span class="badge">${cur.badge}</span>`:""}</div>`;
+  refreshPushBtn();
 
   const app = document.getElementById("app");
   if(view==="amendes") app.innerHTML = renderCompte();
@@ -617,7 +622,7 @@ function renderCompte(){
     </div>
     <div class="empty" style="margin-bottom:12px">
       ${deadlineTxt}<br>
-      🍺 Chaque 1er du mois : cotisation obligatoire de 3€ « Achat fûts de bière » ajoutée automatiquement au solde de chacun.
+      🍺 Chaque 1er du mois : cotisation « Achat fûts de bière » ajoutée automatiquement au solde de chacun.
     </div>`;
 
   /* ---- mes engagements récompensés ---- */
@@ -801,8 +806,7 @@ function renderClassement(){
           <b style="flex:1">${esc(r.nom)}</b>
           <span style="font-family:'Archivo Black';font-size:16px;color:${r.tot?"var(--billet)":"var(--txt-dim)"}">${r.tot} €</span>
         </div>`).join("")}
-    </div>
-    <div class="empty" style="margin-top:10px">Total réellement versé à la caisse — majorations comprises 😄</div>`;
+    </div>`;
 }
 
 function renderEquipe(){
@@ -1058,11 +1062,7 @@ function renderMatchs(){
       <button class="${teamFilter==='tous'?'on':''}" onclick="setTeam('tous')">Toutes</button>
       ${equipes.map(e=>`<button class="${teamFilter===e.id?'on':''}" onclick="setTeam('${e.id}')">${esc(e.nom)}</button>`).join("")}
     </div>
-    ${filtered.length ? filtered.map(matchCard).join("") : `<div class="empty">Aucun match à venir${isGest()?" — ajoute le calendrier !":""}</div>`}
-    <div class="empty" style="margin-top:4px">
-      La table de marque se gère depuis « 💶 Mon compte » :
-      déclare-la après le match pour gagner −${CREDIT_TABLE} € sur ton solde 💪
-    </div>`;
+    ${filtered.length ? filtered.map(matchCard).join("") : `<div class="empty">Aucun match à venir${isGest()?" — ajoute le calendrier !":""}</div>`}`;
 }
 function matchCard(m){
   const f = fmtDate(m.date_match);
@@ -1223,11 +1223,7 @@ function renderAperos(){
   const addBtn = isGest() ? `<button class="add-mini" onclick="openAperoForm()">+ Ajouter un vendredi</button>` : "";
   return `
     <div class="section-label">🍻 Apéros du vendredi ${addBtn}</div>
-    ${upcoming.length ? upcoming.map(aperoCard).join("") : `<div class="empty">Aucun apéro programmé${isGest()?" — ajoute les prochains vendredis !":""}</div>`}
-    <div class="empty" style="margin-top:4px">
-      Après l'entraînement du vendredi, deux volontaires gèrent l'apéro.
-      SG1 et SG2 confondus — tout le monde s'entraîne ensemble 🤝
-    </div>`;
+    ${upcoming.length ? upcoming.map(aperoCard).join("") : `<div class="empty">Aucun apéro programmé${isGest()?" — ajoute les prochains vendredis !":""}</div>`}`;
 }
 function aperoCard(a){
   const f = fmtDate(a.date_apero);
@@ -1328,6 +1324,61 @@ function openSheet(html){
 function closeModal(){document.getElementById("overlay").classList.remove("open")}
 function setView(v){view=v;render()}
 function setTeam(t){teamFilter=t;render()}
+/* ---------- notifications push ---------- */
+let pushSub = null;
+function urlB64ToU8(b64){
+  const pad = "=".repeat((4 - b64.length % 4) % 4);
+  const raw = atob((b64 + pad).replace(/-/g, "+").replace(/_/g, "/"));
+  return Uint8Array.from([...raw].map(c=>c.charCodeAt(0)));
+}
+async function initPush(){
+  if(!("serviceWorker" in navigator) || !("PushManager" in window)) return;
+  try{
+    const reg = await navigator.serviceWorker.register("./sw.js");
+    pushSub = await reg.pushManager.getSubscription();
+    refreshPushBtn();
+  }catch(e){}
+}
+function refreshPushBtn(){
+  const b = document.getElementById("pushBtn");
+  if(b) b.innerHTML = pushSub
+    ? `<span>🔕 Désactiver les notifications</span>`
+    : `<span>🔔 Activer les notifications</span>`;
+}
+async function togglePush(){
+  if(!("serviceWorker" in navigator) || !("PushManager" in window)){
+    toast("Notifications non supportées sur ce navigateur"); return;
+  }
+  try{
+    if(pushSub){
+      const ep = pushSub.endpoint;
+      await pushSub.unsubscribe();
+      pushSub = null;
+      await db.rpc("desinscrire_push", {p_token:AUTH.token, p_endpoint:ep});
+      refreshPushBtn();
+      toast("Notifications désactivées 🔕");
+      return;
+    }
+    const perm = await Notification.requestPermission();
+    if(perm !== "granted"){ toast("Autorisation refusée dans le navigateur"); return; }
+    const reg = await navigator.serviceWorker.ready;
+    pushSub = await reg.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: urlB64ToU8(VAPID_PUBLIC_KEY)
+    });
+    const j = pushSub.toJSON();
+    const {error} = await db.rpc("inscrire_push", {
+      p_token:AUTH.token, p_endpoint:j.endpoint,
+      p_p256dh:j.keys.p256dh, p_auth:j.keys.auth
+    });
+    if(rpcError(error)){ await pushSub.unsubscribe(); pushSub=null; refreshPushBtn(); return; }
+    refreshPushBtn();
+    toast("Notifications activées 🔔");
+  }catch(e){
+    toast("Impossible d'activer : " + e.message);
+  }
+}
+
 function toggleMenu(e){
   e.stopPropagation();
   document.getElementById("drawer")?.classList.toggle("open");
@@ -1352,6 +1403,7 @@ function toast(msg){
 (async ()=>{
   // tâche automatique idempotente : cotisation du 1er du mois pour tous
   try { await db.rpc("appliquer_cotisation_mensuelle"); } catch(e){}
+  initPush();
   if(await loadAll()) render();
 })();
 
