@@ -301,6 +301,7 @@ function avatarColor(name){
 }
 function fmtDate(iso){const d=new Date(iso+"T00:00:00");return{jour:d.getDate(),mois:MOIS[d.getMonth()]}}
 function fmtDM(iso){const d=new Date(iso);return `${String(d.getDate()).padStart(2,"0")}/${String(d.getMonth()+1).padStart(2,"0")}`}
+function fmtDMH(iso){if(!iso)return "—";const d=new Date(iso);return `${String(d.getDate()).padStart(2,"0")}/${String(d.getMonth()+1).padStart(2,"0")} à ${String(d.getHours()).padStart(2,"0")}h${String(d.getMinutes()).padStart(2,"0")}`}
 function todayISO(){const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`}
 function seasonStart(){
   const d = new Date();
@@ -404,7 +405,7 @@ function render(){
   mn.innerHTML = `
     <div class="drawer-bg" id="drawerBg" onclick="closeMenu()"></div>
     <div class="drawer" id="drawer">
-      <div class="d-brand"><b>HBC PILAT SG</b><span>La Caisse Noire · Saison 2026-27 · v2.6.1</span></div>
+      <div class="d-brand"><b>HBC PILAT SG</b><span>La Caisse Noire · Saison 2026-27 · v2.7</span></div>
       ${VIEWS.map(v=>`<button class="menu-item ${v.id===view?'on':''}" onclick="setView('${v.id}')">
         <span>${v.label}</span>${v.badge?`<span class="badge">${v.badge}</span>`:""}</button>`).join("")}
       <div style="border-top:1.5px solid var(--line);margin-top:10px;padding-top:8px">
@@ -996,9 +997,12 @@ function resetPin(id, nom){
 function ficheJoueur(id){
   if(!isGest()) return;
   const j = joueursAll.find(x=>x.id===id); if(!j) return;
-  const mesA = amendes.filter(a=>a.joueur_id===id);
-  const mesT = tablesMarque.filter(t=>t.joueur_id===id);
-  const mesP = paiements.filter(p=>p.joueur_id===id);
+  const mesA = amendes.filter(a=>a.joueur_id===id)
+    .sort((x,y)=>(y.date_amende||"").localeCompare(x.date_amende||""));
+  const mesT = tablesMarque.filter(t=>t.joueur_id===id)
+    .sort((x,y)=>(y.declare_le||"").localeCompare(x.declare_le||""));
+  const mesP = paiements.filter(p=>p.joueur_id===id)
+    .sort((x,y)=>(y.declare_le||"").localeCompare(x.declare_le||""));
   const totAmendes = mesA.reduce((s,a)=>s+Number(a.montant),0);
   const totCredits = mesT.filter(t=>t.statut==="valide").reduce((s,t)=>s+Number(t.montant),0);
   const totPayes = mesP.filter(p=>p.statut==="valide").reduce((s,p)=>s+Number(p.montant),0);
@@ -1019,11 +1023,11 @@ function ficheJoueur(id){
   const lT = t => `<div style="padding:8px 0;border-top:1px solid var(--paper-dim);font-size:13px">
       <div style="display:flex;justify-content:space-between;gap:8px"><b>${esc(t.motif||"Table de marque")}</b>
         <span style="font-family:'Archivo Black';color:${t.statut==='valide'?'var(--billet)':'var(--attente)'};white-space:nowrap">−${t.montant} € ${t.statut==='valide'?'✓':'⏳'}</span></div>
-      <div style="color:var(--txt-dim);font-size:12px">déclarée le ${fmtDM(t.declare_le)}${t.valide_le?` · validé le ${fmtDM(t.valide_le)}${t.valide_par?" par "+esc(nomDe(t.valide_par)):""}`:" · en attente"}</div></div>`;
+      <div style="color:var(--txt-dim);font-size:12px">déclarée le ${fmtDMH(t.declare_le)}${t.valide_le?` · validé le ${fmtDMH(t.valide_le)}${t.valide_par?" par "+esc(nomDe(t.valide_par)):""}`:" · en attente"}</div></div>`;
   const lP = p => `<div style="padding:8px 0;border-top:1px solid var(--paper-dim);font-size:13px">
       <div style="display:flex;justify-content:space-between;gap:8px"><b>Paiement (${MOYENS[p.moyen]||"?"})</b>
         <span style="font-family:'Archivo Black';color:${p.statut==='valide'?'var(--billet)':'var(--attente)'};white-space:nowrap">${p.montant} € ${p.statut==='valide'?'✓':'⏳'}</span></div>
-      <div style="color:var(--txt-dim);font-size:12px">déclaré le ${fmtDM(p.declare_le)}${p.valide_le?` · <b>validé le ${fmtDM(p.valide_le)}${p.valide_par?" par "+esc(nomDe(p.valide_par)):""}</b>`:" · en attente de validation"}</div></div>`;
+      <div style="color:var(--txt-dim);font-size:12px">déclaré le ${fmtDMH(p.declare_le)}${p.valide_le?` · <b>validé le ${fmtDMH(p.valide_le)}${p.valide_par?" par "+esc(nomDe(p.valide_par)):""}</b>`:" · en attente de validation"}</div></div>`;
   openSheet(`
     <h3>${esc(j.nom)}${j.actif?"":" <span style='color:var(--txt-dim);font-size:13px'>(retiré)</span>"}
       ${ROLES[j.role]?` <span class="gest-badge">${j.role==='super'?'SUPER':'GESTIONNAIRE'}</span>`:""}</h3>
