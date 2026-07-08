@@ -396,7 +396,7 @@ function render(){
     {id:"classement", label:"🏆 Classement des payeurs"},
     {id:"equipe",     label:"💀 Amendes de l'équipe"},
     {id:"paiements",  label:"✅ Historique des paiements"},
-    {id:"bareme",     label:"⚖️ Barème"},
+    {id:"bareme",     label:"⚖️ Tarifs"},
   ];
   if(isGest()) VIEWS.push({id:"joueurs", label:"👥 Joueurs"});
   const cur = VIEWS.find(v=>v.id===view) || VIEWS[0];
@@ -405,7 +405,7 @@ function render(){
   mn.innerHTML = `
     <div class="drawer-bg" id="drawerBg" onclick="closeMenu()"></div>
     <div class="drawer" id="drawer">
-      <div class="d-brand"><b>HBC PILAT SG</b><span>La Caisse Noire · Saison 2026-27 · v2.8</span></div>
+      <div class="d-brand"><b>HBC PILAT SG</b><span>La Caisse Noire · Saison 2026-27 · v2.9</span></div>
       ${VIEWS.map(v=>`<button class="menu-item ${v.id===view?'on':''}" onclick="setView('${v.id}')">
         <span>${v.label}</span>${v.badge?`<span class="badge">${v.badge}</span>`:""}</button>`).join("")}
       <div style="border-top:1.5px solid var(--line);margin-top:10px;padding-top:8px">
@@ -860,7 +860,7 @@ function renderPaiements(){
 function renderBareme(){
   if(!isGest()){
     return `
-      <div class="section-label">Barème des amendes</div>
+      <div class="section-label">Tarifs des amendes</div>
       ${bareme.map(b=>`
         <div class="bareme-row">
           <div class="motif">${esc(b.motif)}</div>
@@ -884,7 +884,7 @@ function renderBareme(){
       </div>`;
   }
   return `
-    <div class="section-label">Barème des amendes
+    <div class="section-label">Tarifs des amendes
       <button class="add-mini" onclick="openBaremeForm()">+ Nouvelle catégorie</button></div>
     ${bareme.map(b=>`
       <div class="bareme-row">
@@ -963,7 +963,7 @@ function renderJoueurs(){
       <div class="motif" style="cursor:pointer" onclick="ficheJoueur('${j.id}')">${esc(j.nom)}${j.id===AUTH.id?" (toi)":""} <span style="font-size:11px;color:var(--bleu)">fiche ›</span>
         ${ROLES[j.role]?`<span class="gest-badge" style="margin-left:6px">${j.role==="super"?"SUPER":"GESTIONNAIRE"}</span>`:""}</div>
       ${canManage(j) ? (dim
-        ? `<button class="mini" style="border:0;background:none;cursor:pointer;font-family:'Archivo';font-weight:700;font-size:12px;color:var(--billet)" onclick="gererJoueur('${j.id}','reactiver','${esc(j.nom)}')">Réactiver ↩</button>`
+        ? `<button class="mini" style="border:0;background:none;cursor:pointer;font-family:'Archivo';font-weight:700;font-size:12px;color:var(--billet)" onclick="gererJoueur('${j.id}','reactiver','${esc(j.nom)}')">Réactiver ↩</button>${isSuper()?`<button class="mini" style="border:0;background:none;cursor:pointer;font-family:'Archivo';font-weight:700;font-size:12px;color:var(--amende)" onclick="supprimerJoueur('${j.id}','${esc(j.nom)}')">Supprimer 🗑</button>`:""}`
         : `<button class="mini" style="border:0;background:none;cursor:pointer;font-family:'Archivo';font-weight:700;font-size:12px;color:var(--bleu)" onclick="resetPin('${j.id}','${esc(j.nom)}')">PIN ↺</button>
            <button class="mini" style="border:0;background:none;cursor:pointer;font-family:'Archivo';font-weight:700;font-size:12px;color:var(--amende)" onclick="retirerJoueur('${j.id}','${esc(j.nom)}')">Retirer ✕</button>`)
         : ""}
@@ -978,7 +978,7 @@ function renderJoueurs(){
       Clique sur un nom pour ouvrir sa fiche complète
       (solde, amendes, paiements, tables de marque, casse-croûtes, apéros).<br>
       « PIN ↺ » réinitialise le code d'un joueur qui l'a oublié.
-      Un joueur retiré garde son historique et peut être réactivé.
+      Un joueur retiré garde son historique et peut être réactivé.${isSuper()?"<br>« Supprimer 🗑 » (super gestionnaire) efface définitivement un joueur retiré, sauf s'il a des contributions validées.":""}
     </div>`;
 }
 async function gererJoueur(id, action, nom){
@@ -996,6 +996,13 @@ function retirerJoueur(id, nom){
 function resetPin(id, nom){
   if(!confirm(`Réinitialiser le code PIN de ${nom} ?\nIl choisira un nouveau code à sa prochaine connexion.`)) return;
   gererJoueur(id, "reset_pin", nom);
+}
+async function supprimerJoueur(id, nom){
+  if(!confirm(`⚠️ SUPPRIMER DÉFINITIVEMENT ${nom} ?\n\nCette action est IRRÉVERSIBLE et efface son compte ainsi que son historique non-validé.\nSi ${nom} a des contributions validées, la suppression sera refusée (utilise Retirer).`)) return;
+  const {error} = await db.rpc("supprimer_joueur", {p_token:AUTH.token, p_cible:id});
+  if(rpcError(error)) return;
+  await loadAll(); render();
+  toast(`${nom} supprimé définitivement`);
 }
 
 function ficheJoueur(id){
