@@ -339,14 +339,14 @@ async function loadAll(){
     db.from("equipes").select().order("nom"),
     db.from("joueurs").select("id,nom,role,actif").order("nom"),
     db.from("bareme").select().eq("actif",true).order("ordre"),
-    db.from("amendes").select("*, joueurs(nom)").order("date_amende",{ascending:false}),
+    db.from("amendes").select("*, joueurs!amendes_joueur_id_fkey(nom)").order("date_amende",{ascending:false}),
     db.from("matchs").select("*, equipes(nom,couleur), inscriptions(*, joueurs(nom))")
       .gte("date_match", todayISO())
       .order("date_match"),
     db.from("inscriptions").select("joueur_id, section, matchs(date_match)"),
     db.from("aperos").select("*, apero_inscriptions(*, joueurs(nom))").order("date_apero"),
-    db.from("paiements").select("*, joueurs(nom)").order("declare_le",{ascending:false}),
-    db.from("tables_marque").select("*, joueurs(nom)").order("declare_le",{ascending:false}),
+    db.from("paiements").select("*, joueurs!paiements_joueur_id_fkey(nom)").order("declare_le",{ascending:false}),
+    db.from("tables_marque").select("*, joueurs!tables_marque_joueur_id_fkey(nom)").order("declare_le",{ascending:false}),
   ]);
   const err = eq.error||jo.error||ba.error||am.error||ma.error||ins.error||ap.error||pa.error||tm.error;
   if(err){
@@ -404,7 +404,7 @@ function render(){
   mn.innerHTML = `
     <div class="drawer-bg" id="drawerBg" onclick="closeMenu()"></div>
     <div class="drawer" id="drawer">
-      <div class="d-brand"><b>HBC PILAT SG</b><span>La Caisse Noire · Saison 2026-27 · v2.6</span></div>
+      <div class="d-brand"><b>HBC PILAT SG</b><span>La Caisse Noire · Saison 2026-27 · v2.6.1</span></div>
       ${VIEWS.map(v=>`<button class="menu-item ${v.id===view?'on':''}" onclick="setView('${v.id}')">
         <span>${v.label}</span>${v.badge?`<span class="badge">${v.badge}</span>`:""}</button>`).join("")}
       <div style="border-top:1.5px solid var(--line);margin-top:10px;padding-top:8px">
