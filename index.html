@@ -320,6 +320,21 @@ function solde(id){
   const pa = paiements.filter(p=>p.joueur_id===id && p.statut==="valide").reduce((s,p)=>s+Number(p.montant),0);
   return Math.round((am - cr - pa) * 100) / 100;
 }
+/* Net du mois en cours = amendes du mois − crédits validés du mois (pas encore exigible) */
+function monthStartISO(){
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-01`;
+}
+function soldeMoisCourant(id){
+  const ms = monthStartISO();
+  const am = amendes.filter(a=>a.joueur_id===id && a.date_amende>=ms).reduce((s,a)=>s+Number(a.montant),0);
+  const cr = tablesMarque.filter(t=>t.joueur_id===id && t.statut==="valide" && t.declare_le>=ms).reduce((s,t)=>s+Number(t.montant),0);
+  return Math.round((am - cr) * 100) / 100;
+}
+/* Reste à payer des mois précédents = solde total − mois en cours (échéance le 5) */
+function soldeDu(id){
+  return Math.round((solde(id) - soldeMoisCourant(id)) * 100) / 100;
+}
 
 const nomDe = id => (joueursAll.find(j=>j.id===id)||{}).nom || "";
 function rpcError(error){
@@ -405,7 +420,7 @@ function render(){
   mn.innerHTML = `
     <div class="drawer-bg" id="drawerBg" onclick="closeMenu()"></div>
     <div class="drawer" id="drawer">
-      <div class="d-brand"><b>HBC PILAT SG</b><span>La Caisse Noire · Saison 2026-27 · v2.9</span></div>
+      <div class="d-brand"><b>HBC PILAT SG</b><span>La Caisse Noire · Saison 2026-27 · v2.10</span></div>
       ${VIEWS.map(v=>`<button class="menu-item ${v.id===view?'on':''}" onclick="setView('${v.id}')">
         <span>${v.label}</span>${v.badge?`<span class="badge">${v.badge}</span>`:""}</button>`).join("")}
       <div style="border-top:1.5px solid var(--line);margin-top:10px;padding-top:8px">
@@ -570,21 +585,18 @@ function renderCompte(){
           <button class="btn btn-no" onclick="refuserTable('${t.id}')">Refuser</button>
         </div>`}</div>`).join("");
 
-    /* retards : à partir du 11 du mois */
+    /* retards : à partir du 6 du mois (échéance déplacée au 5) */
     const now = new Date();
-    if(now.getDate() >= 11){
-      const monthStart = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}-01`;
+    if(now.getDate() >= 6){
+      const monthStart = monthStartISO();
       const retards = joueurs.map(j=>{
-        const duAvant = amendes.filter(a=>a.joueur_id===j.id && a.date_amende < monthStart)
-                          .reduce((s,a)=>s+Number(a.montant),0)
-          - tablesMarque.filter(t=>t.joueur_id===j.id && t.statut==="valide").reduce((s,t)=>s+Number(t.montant),0)
-          - paiements.filter(p=>p.joueur_id===j.id && p.statut==="valide").reduce((s,p)=>s+Number(p.montant),0);
+        const du = soldeDu(j.id);
         const deja = amendes.some(a=>a.joueur_id===j.id
           && a.motif==="Retard de paiement mensuel" && a.date_amende >= monthStart);
-        return {j, du:Math.round(duAvant*100)/100, deja};
+        return {j, du, deja};
       }).filter(r=>r.du > 0);
       if(retards.length){
-        out += `<div class="section-label">⏰ Retards de paiement (échéance du 10 dépassée)</div>` +
+        out += `<div class="section-label">⏰ Retards de paiement (échéance du 5 dépassée)</div>` +
           retards.map(r=>`
             <div class="bareme-row">
               <div class="motif">${esc(r.j.nom)} <span style="color:var(--amende);font-family:'Archivo Black'">${r.du} €</span> <span style="color:var(--txt-dim);font-size:12px">dus des mois précédents</span></div>
@@ -603,20 +615,26 @@ function renderCompte(){
   const moisCour = MOIS_LONG[mois];
   const moisSuiv = MOIS_LONG[(mois+1)%12];
   const cotisMontant = (bareme.find(b=>(b.motif||"").startsWith("Achat fûts"))||{}).montant ?? 3;
-  const deadlineTxt = jour <= 10
-    ? `📆 Le solde de <b>${moisPrec}</b> est à régler <b>avant le 10 ${moisCour}</b>. Passé ce délai : majoration de 2 €.`
-    : `📆 Le solde de <b>${moisCour}</b> sera à régler <b>avant le 10 ${moisSuiv}</b>. Retard = majoration de 2 €.`;
-  const s = solde(AUTH.id);
+  const deadlineTxt = jour <= 5
+    ? `📆 Le reste à payer de <b>${moisPrec}</b> est à régler <b>avant le 5 ${moisCour}</b>. Passé ce délai : majoration de 2 €.`
+    : `📆 Le solde de <b>${moisCour}</b> sera à régler <b>avant le 5 ${moisSuiv}</b>. Retard = majoration de 2 €.`;
+  const sCourant = soldeMoisCourant(AUTH.id);
+  const sDu = soldeDu(AUTH.id);
   const pend = paiements.find(p=>p.joueur_id===AUTH.id && p.statut==="pending");
   out += `
     <div class="section-label">Mon compte</div>
+    <div class="ticket" style="text-align:center;padding:18px 16px 16px;margin-bottom:8px">
+      <div style="font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--txt-dim)">📅 Mois en cours (${moisCour})</div>
+      <div style="font-family:'Archivo Black';font-size:26px;line-height:1.2;color:var(--txt-dim)">${sCourant<0?`avoir ${Math.abs(sCourant)}`:sCourant} €</div>
+      <div style="font-size:12px;color:var(--txt-dim);margin-top:2px">pas encore exigible — sera dû avant le 5 ${moisSuiv}</div>
+    </div>
     <div class="ticket" style="text-align:center;padding:22px 16px 18px">
-      <div style="font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--txt-dim)">${s<0?"Mon avoir":"Mon solde à payer"}</div>
-      <div style="font-family:'Archivo Black';font-size:42px;line-height:1.1;color:${s>0?"var(--amende)":"var(--billet)"}">${s<0?Math.abs(s):s} €</div>
-      ${s<0?`<div style="font-size:12.5px;color:var(--billet);font-weight:600;margin-top:2px">Grâce à ton engagement dans l'équipe, tes prochaines amendes seront déduites de cet avoir 😎</div>`:""}
+      <div style="font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--txt-dim)">${sDu<0?"Mon avoir":"Reste à payer (mois précédents)"}</div>
+      <div style="font-family:'Archivo Black';font-size:42px;line-height:1.1;color:${sDu>0?"var(--amende)":"var(--billet)"}">${sDu<0?Math.abs(sDu):sDu} €</div>
+      ${sDu<0?`<div style="font-size:12.5px;color:var(--billet);font-weight:600;margin-top:2px">Grâce à ton engagement dans l'équipe, tes prochaines amendes seront déduites de cet avoir 😎</div>`:""}
       ${pend ? `<div style="font-size:13px;color:var(--attente);font-weight:700;margin-top:4px">⏳ Paiement de ${pend.montant} € en attente de validation</div>` : ""}
       <div style="display:flex;gap:8px;margin-top:14px;align-items:stretch">
-        <button class="btn btn-pay" style="flex:1;height:auto" ${s>0 && !pend ? `onclick="openPayModal()"` : "disabled style='flex:1;height:auto;opacity:.45;cursor:default'"}>💳 Payer<br>mon solde</button>
+        <button class="btn btn-pay" style="flex:1;height:auto" ${sDu>0 && !pend ? `onclick="openPayModal()"` : "disabled style='flex:1;height:auto;opacity:.45;cursor:default'"}>💳 Payer<br>mon solde</button>
         <div style="flex:1.6;display:flex;flex-direction:column;gap:6px">
           <button class="btn btn-ok" style="font-size:12px;padding:8px 8px" onclick="declarerEngagement('table')">☑️ J'ai fait une table de marque</button>
           <button class="btn btn-ok" style="font-size:12px;padding:8px 8px" onclick="declarerEngagement('apero')">☑️ J'ai organisé l'apéro d'un vendredi</button>
@@ -701,10 +719,10 @@ async function donnerAmende(){
 /* ---- paiement du solde ---- */
 function openPayModal(){
   chosenMoyen = null;
-  const s = solde(AUTH.id);
+  const s = soldeDu(AUTH.id);
   openSheet(`
     <h3>Payer mon solde</h3>
-    <p class="sub">Montant à régler : <b>${s} €</b> (amendes − crédits table de marque)</p>
+    <p class="sub">Reste à payer des mois précédents : <b>${s} €</b> (le mois en cours n'est pas encore exigible)</p>
     <button class="pay-opt" id="optPaypal" onclick="choosePayment('paypal')">
       <div class="ico" style="background:#003087">PP</div>
       <div class="lbl"><b>PayPal — ${s} €</b><span>paypal.me · montant pré-rempli · « entre proches » = sans frais</span></div>
@@ -720,7 +738,7 @@ function openPayModal(){
 }
 function choosePayment(moyen){
   chosenMoyen = moyen;
-  const s = solde(AUTH.id);
+  const s = soldeDu(AUTH.id);
   document.getElementById("optPaypal").style.borderColor = moyen==="paypal" ? "var(--bleu)" : "var(--line)";
   document.getElementById("optCash").style.borderColor   = moyen==="cash"   ? "var(--bleu)" : "var(--line)";
   if(moyen==="paypal"){
