@@ -340,7 +340,7 @@ function rpcError(error){
 async function loadAll(){
   const [eq, jo, ba, am, ma, ins, ap, pa, tm] = await Promise.all([
     db.from("equipes").select().order("nom"),
-    db.from("joueurs").select("id,nom,role,actif").order("nom"),
+    db.from("joueurs").select("id,nom,role,actif,en_attente").order("nom"),
     db.from("bareme").select().eq("actif",true).order("ordre"),
     db.from("amendes").select("*, joueurs!amendes_joueur_id_fkey(nom)").order("date_amende",{ascending:false}),
     db.from("matchs").select("*, equipes(nom,couleur), inscriptions(*, joueurs(nom))")
@@ -407,7 +407,7 @@ function render(){
   mn.innerHTML = `
     <div class="drawer-bg" id="drawerBg" onclick="closeMenu()"></div>
     <div class="drawer" id="drawer">
-      <div class="d-brand"><b>HBC PILAT SG</b><span>La Caisse Noire · Saison 2026-27 · v2.9</span></div>
+      <div class="d-brand"><b>HBC PILAT SG</b><span>La Caisse Noire · Saison 2026-27 · v2.9.1</span></div>
       ${VIEWS.map(v=>`<button class="menu-item ${v.id===view?'on':''}" onclick="setView('${v.id}')">
         <span>${v.label}</span>${v.badge?`<span class="badge">${v.badge}</span>`:""}</button>`).join("")}
       <div style="border-top:1.5px solid var(--line);margin-top:10px;padding-top:8px">
@@ -498,28 +498,35 @@ async function doCreatePin(){
 function openRegisterForm(){
   openSheet(`
     <h3>Bienvenue ! 🤾</h3>
-    <p class="sub">Ton prénom apparaîtra dans la liste de l'équipe.</p>
+    <p class="sub">Ton inscription sera visible après validation par un gestionnaire.</p>
     <div class="field"><label>Ton prénom</label>
       <input id="fNom" placeholder="Ex : Kévin" maxlength="30"></div>
+    <div class="field"><label>Code d'équipe 🤫 (demande-le au vestiaire)</label>
+      <input id="fCode" placeholder="Code de l'équipe" maxlength="30" autocomplete="off"></div>
     ${pinField("fPin1","Choisis ton code (4 chiffres)")}
     ${pinField("fPin2","Confirme ton code")}
     <button class="btn btn-ok btn-full" onclick="registerPlayer()">C'est parti !</button>`);
 }
 async function registerPlayer(){
   const nom=(document.getElementById("fNom").value||"").trim();
+  const code=(document.getElementById("fCode").value||"").trim();
   const p1=(document.getElementById("fPin1").value||"").trim();
   const p2=(document.getElementById("fPin2").value||"").trim();
   if(nom.length<2){ toast("Prénom trop court !"); return; }
+  if(!code){ toast("Il faut le code d'équipe !"); return; }
   if(!/^\d{4}$/.test(p1)){ toast("Le code doit faire 4 chiffres"); return; }
   if(p1!==p2){ toast("Les deux codes ne correspondent pas"); return; }
-  const {data, error} = await db.rpc("register_joueur", {p_nom:nom, p_pin:p1});
+  const {error} = await db.rpc("register_joueur", {p_nom:nom, p_pin:p1, p_code:code});
   if(error){
     toast(error.code==="23505" || (error.message||"").includes("duplicate")
       ? "Ce prénom existe déjà — ajoute une initiale (ex : Kévin B.)"
-      : "Erreur : "+error.message);
+      : (error.message||"").includes("code équipe")
+        ? "Code d'équipe incorrect 🚫"
+        : "Erreur : "+error.message);
     return;
   }
-  setAuth(data);
+  closeModal();
+  toast("Inscription envoyée ! ⏳ Un gestionnaire doit valider ton compte.");
 }
 function setAuth(data){
   AUTH = data;
@@ -958,7 +965,8 @@ function canManage(j){
 }
 function renderJoueurs(){
   const actifs = joueursAll.filter(j=>j.actif);
-  const retires = joueursAll.filter(j=>!j.actif);
+  const attente = joueursAll.filter(j=>!j.actif && j.en_attente);
+  const retires = joueursAll.filter(j=>!j.actif && !j.en_attente);
   const row = (j, dim) => `
     <div class="bareme-row" ${dim?'style="opacity:.65"':''}>
       <span class="avatar" style="background:${dim?"#a7b6c4":avatarColor(j.nom)};width:28px;height:28px;border-radius:50%;flex:none;display:flex;align-items:center;justify-content:center;font-family:'Archivo Black';font-size:11px;color:#fff">${esc(j.nom.slice(0,2).toUpperCase())}</span>
@@ -971,6 +979,15 @@ function renderJoueurs(){
         : ""}
     </div>`;
   return `
+    ${attente.length ? `
+      <div class="section-label">⏳ Inscriptions à valider (${attente.length})</div>
+      ${attente.map(j=>`
+        <div class="bareme-row">
+          <span class="avatar" style="background:${avatarColor(j.nom)};width:28px;height:28px;border-radius:50%;flex:none;display:flex;align-items:center;justify-content:center;font-family:'Archivo Black';font-size:11px;color:#fff">${esc(j.nom.slice(0,2).toUpperCase())}</span>
+          <div class="motif">${esc(j.nom)}</div>
+          <button class="mini" style="border:0;background:none;cursor:pointer;font-family:'Archivo';font-weight:700;font-size:12px;color:var(--billet)" onclick="traiterInscription('${j.id}','${esc(j.nom)}','approuver')">Accepter ✓</button>
+          <button class="mini" style="border:0;background:none;cursor:pointer;font-family:'Archivo';font-weight:700;font-size:12px;color:var(--amende)" onclick="traiterInscription('${j.id}','${esc(j.nom)}','refuser')">Refuser ✕</button>
+        </div>`).join("")}` : ""}
     <div class="section-label">Joueurs (${actifs.length})</div>
     ${actifs.map(j=>row(j,false)).join("")}
     ${retires.length ? `
@@ -982,6 +999,13 @@ function renderJoueurs(){
       « PIN ↺ » réinitialise le code d'un joueur qui l'a oublié.
       Un joueur retiré garde son historique et peut être réactivé.${isSuper()?"<br>« Supprimer 🗑 » (super gestionnaire) efface définitivement un joueur retiré, sauf s'il a des contributions validées.":""}
     </div>`;
+}
+async function traiterInscription(id, nom, decision){
+  if(decision==="refuser" && !confirm(`Refuser l'inscription de ${nom} ?\nSon compte sera supprimé.`)) return;
+  const {error} = await db.rpc("traiter_inscription", {p_token:AUTH.token, p_cible:id, p_decision:decision});
+  if(rpcError(error)) return;
+  await loadAll(); render();
+  toast(decision==="approuver" ? `${nom} rejoint l'équipe ! 🎉` : `Inscription de ${nom} refusée`);
 }
 async function gererJoueur(id, action, nom){
   const {error} = await db.rpc("gerer_joueur", {p_token:AUTH.token, p_cible:id, p_action:action});
