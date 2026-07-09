@@ -420,7 +420,7 @@ function render(){
   mn.innerHTML = `
     <div class="drawer-bg" id="drawerBg" onclick="closeMenu()"></div>
     <div class="drawer" id="drawer">
-      <div class="d-brand"><b>HBC PILAT SG</b><span>La Caisse Noire · Saison 2026-27 · v2.10</span></div>
+      <div class="d-brand"><b>HBC PILAT SG</b><span>La Caisse Noire · Saison 2026-27 · v2.11</span></div>
       ${VIEWS.map(v=>`<button class="menu-item ${v.id===view?'on':''}" onclick="setView('${v.id}')">
         <span>${v.label}</span>${v.badge?`<span class="badge">${v.badge}</span>`:""}</button>`).join("")}
       <div style="border-top:1.5px solid var(--line);margin-top:10px;padding-top:8px">
@@ -585,21 +585,28 @@ function renderCompte(){
           <button class="btn btn-no" onclick="refuserTable('${t.id}')">Refuser</button>
         </div>`}</div>`).join("");
 
-    /* retards : à partir du 6 du mois (échéance déplacée au 5) */
+    /* retards : à partir du 6 du mois (échéance déplacée au 5)
+       → un joueur qui doit encore, OU qui a déclaré son paiement après le 5,
+         reste sanctionnable (« après l'heure ce n'est plus l'heure ») */
     const now = new Date();
     if(now.getDate() >= 6){
       const monthStart = monthStartISO();
       const retards = joueurs.map(j=>{
         const du = soldeDu(j.id);
+        const tardif = paiements.some(p=>p.joueur_id===j.id
+          && (p.declare_le||"") >= monthStart
+          && new Date(p.declare_le).getDate() > 5);
         const deja = amendes.some(a=>a.joueur_id===j.id
           && a.motif==="Retard de paiement mensuel" && a.date_amende >= monthStart);
-        return {j, du, deja};
-      }).filter(r=>r.du > 0);
+        return {j, du, tardif, deja};
+      }).filter(r=>r.du > 0 || r.tardif);
       if(retards.length){
         out += `<div class="section-label">⏰ Retards de paiement (échéance du 5 dépassée)</div>` +
           retards.map(r=>`
             <div class="bareme-row">
-              <div class="motif">${esc(r.j.nom)} <span style="color:var(--amende);font-family:'Archivo Black'">${r.du} €</span> <span style="color:var(--txt-dim);font-size:12px">dus des mois précédents</span></div>
+              <div class="motif">${esc(r.j.nom)} ${r.du > 0
+                ? `<span style="color:var(--amende);font-family:'Archivo Black'">${r.du} €</span> <span style="color:var(--txt-dim);font-size:12px">dus des mois précédents</span>`
+                : `<span style="color:var(--txt-dim);font-size:12px">a réglé après le 5</span>`}</div>
               ${r.deja
                 ? `<span style="font-size:12px;color:var(--txt-dim)">majoration appliquée ✓</span>`
                 : `<button class="btn btn-no" style="padding:6px 10px;font-size:12px" onclick="appliquerMajoration('${r.j.id}','${esc(r.j.nom)}')">+2 € retard</button>`}
