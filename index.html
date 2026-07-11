@@ -408,7 +408,7 @@ function render(){
   mn.innerHTML = `
     <div class="drawer-bg" id="drawerBg" onclick="closeMenu()"></div>
     <div class="drawer" id="drawer">
-      <div class="d-brand"><b>HBC PILAT SG</b><span>La Caisse Noire · Saison 2026-27 · v2.9.2</span></div>
+      <div class="d-brand"><b>HBC PILAT SG</b><span>La Caisse Noire · Saison 2026-27 · v2.9.3</span></div>
       ${VIEWS.map(v=>`<button class="menu-item ${v.id===view?'on':''}" onclick="setView('${v.id}')">
         <span>${v.label}</span>${v.badge?`<span class="badge">${v.badge}</span>`:""}</button>`).join("")}
       <div style="border-top:1.5px solid var(--line);margin-top:10px;padding-top:8px">
@@ -680,10 +680,27 @@ function renderCompte(){
 }
 
 function ligneAmende(a, withNom){
+  const annulable = isGest() && a.joueur_id !== AUTH.id
+    && !(a.motif||"").startsWith("Achat fûts");
   return `<div class="ticket"><div class="t-head">
     <div><div class="t-motif">${withNom?esc(a.joueurs?.nom||"?")+" — ":""}${esc(a.motif)}</div>
     <div class="t-meta">${fmtDM(a.date_amende)}</div></div>
-    <div class="t-montant due">${a.montant} €</div></div></div>`;
+    <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px">
+      <div class="t-montant due">${a.montant} €</div>
+      ${annulable ? `<button class="mini" style="border:0;background:none;cursor:pointer;font-family:'Archivo';font-weight:700;font-size:11.5px;color:var(--txt-dim);text-decoration:underline" onclick="annulerAmende('${a.id}','${esc(a.joueurs?.nom||"")}','${esc(a.motif)}',${a.montant})">annuler</button>` : ""}
+    </div></div></div>`;
+}
+async function annulerAmende(id, nom, motif, montant){
+  if(!confirm(`Annuler l'amende « ${motif} » (${montant} €)${nom?` de ${nom}`:""} ?\nElle sera définitivement supprimée de son solde.`)) return;
+  const {error} = await db.rpc("annuler_amende", {p_token:AUTH.token, p_id:id});
+  if(error){
+    toast((error.message||"").includes("réglée")
+      ? "Impossible : cette amende a déjà été réglée 💶"
+      : "Erreur : "+error.message);
+    return;
+  }
+  await loadAll(); render();
+  toast("Amende annulée ✓");
 }
 
 /* ---- donner une amende (gestionnaires) ---- */
