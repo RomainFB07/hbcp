@@ -265,7 +265,7 @@
 const SUPABASE_URL = "https://mubcdbnjzqsvuhhdogky.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im11YmNkYm5qenFzdnVoaGRvZ2t5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODMzNTAzOTAsImV4cCI6MjA5ODkyNjM5MH0.Up5TlGC7fPW8yN43RefF_g9QpmyPml31Ev3a1Gx07ks";
 
-/* Ton pseudo paypal.me (https://paypal.me/romainfb) */
+/* Le pseudo paypal.me du club (https://paypal.me/hbcpsg) */
 const PAY_CONFIG = {
   paypalUser: "hbcpsg",
 };
@@ -396,6 +396,7 @@ function render(){
     {id:"matchs",     label:"📅 Matchs", badge:libres},
     {id:"aperos",     label:"🍻 Apéros du vendredi"},
     {id:"classement", label:"🏆 Classement des payeurs"},
+    {id:"engages",    label:"🤝 Les plus engagés"},
     {id:"equipe",     label:"💀 Amendes de l'équipe"},
     {id:"paiements",  label:"✅ Historique des paiements"},
     {id:"bareme",     label:"⚖️ Tarifs"},
@@ -407,7 +408,7 @@ function render(){
   mn.innerHTML = `
     <div class="drawer-bg" id="drawerBg" onclick="closeMenu()"></div>
     <div class="drawer" id="drawer">
-      <div class="d-brand"><b>HBC PILAT SG</b><span>La Caisse Noire · Saison 2026-27 · v2.9.1</span></div>
+      <div class="d-brand"><b>HBC PILAT SG</b><span>La Caisse Noire · Saison 2026-27 · v2.9.2</span></div>
       ${VIEWS.map(v=>`<button class="menu-item ${v.id===view?'on':''}" onclick="setView('${v.id}')">
         <span>${v.label}</span>${v.badge?`<span class="badge">${v.badge}</span>`:""}</button>`).join("")}
       <div style="border-top:1.5px solid var(--line);margin-top:10px;padding-top:8px">
@@ -422,6 +423,7 @@ function render(){
   else if(view==="matchs") app.innerHTML = renderMatchs();
   else if(view==="aperos") app.innerHTML = renderAperos();
   else if(view==="classement") app.innerHTML = renderClassement();
+  else if(view==="engages") app.innerHTML = renderEngages();
   else if(view==="equipe") app.innerHTML = renderEquipe();
   else if(view==="paiements") app.innerHTML = renderPaiements();
   else if(view==="bareme") app.innerHTML = renderBareme();
@@ -822,6 +824,42 @@ function renderClassement(){
           <b style="flex:1">${esc(r.nom)}</b>
           <span style="font-family:'Archivo Black';font-size:16px;color:${r.tot?"var(--billet)":"var(--txt-dim)"}">${r.tot} €</span>
         </div>`).join("")}
+    </div>`;
+}
+
+/* ---- classement des engagements (3 podiums) ---- */
+function renderEngages(){
+  const valides = tablesMarque.filter(t=>t.statut==="valide");
+  const compte = (j, prefixe) => valides.filter(t=>t.joueur_id===j.id
+    && (t.motif||"Table de marque").startsWith(prefixe)).length;
+  const podium = (prefixe) => joueurs
+    .map(j=>({nom:j.nom, n:compte(j, prefixe)}))
+    .filter(r=>r.n>0)
+    .sort((a,b)=>b.n-a.n || a.nom.localeCompare(b.nom));
+  const medals = ["🥇","🥈","🥉"];
+  const colonne = (titre, emoji, rows) => `
+    <div style="flex:1;min-width:0">
+      <div style="text-align:center;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--txt-dim);margin-bottom:8px">${emoji}<br>${titre}</div>
+      ${rows.length ? rows.map((r,i)=>`
+        <div style="display:flex;align-items:center;gap:5px;padding:4px 0;${i?"border-top:1px solid var(--paper-dim)":""}">
+          <span style="width:20px;text-align:center;flex:none;${i<3?"font-size:14px":"font-family:'Archivo Black';font-size:11px;color:var(--txt-dim)"}">${i<3?medals[i]:i+1}</span>
+          <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:700;font-size:12.5px">${esc(r.nom)}</span>
+          <span style="font-family:'Archivo Black';font-size:14px;color:var(--billet);flex:none">${r.n}</span>
+        </div>`).join("")
+      : `<div style="text-align:center;font-size:11.5px;color:var(--txt-dim);padding:8px 0">Personne pour l'instant…<br>à toi de jouer !</div>`}
+    </div>`;
+  return `<div class="section-label">🤝 Les plus engagés pour l'équipe</div>
+    <div class="ticket" style="padding:16px 12px">
+      <div style="display:flex;gap:10px;align-items:flex-start">
+        ${colonne("Tables de marque","📋", podium("Table"))}
+        <div style="width:1px;align-self:stretch;background:var(--paper-dim);flex:none"></div>
+        ${colonne("Apéros du vendredi","🍻", podium("Apéro"))}
+        <div style="width:1px;align-self:stretch;background:var(--paper-dim);flex:none"></div>
+        ${colonne("Casse-croûtes","🍔", podium("Casse"))}
+      </div>
+      <div style="font-size:11.5px;color:var(--txt-dim);text-align:center;margin-top:12px">
+        Seuls les engagements validés par un gestionnaire sont comptés 💪
+      </div>
     </div>`;
 }
 
