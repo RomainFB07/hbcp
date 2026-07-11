@@ -408,7 +408,7 @@ function render(){
   mn.innerHTML = `
     <div class="drawer-bg" id="drawerBg" onclick="closeMenu()"></div>
     <div class="drawer" id="drawer">
-      <div class="d-brand"><b>HBC PILAT SG</b><span>La Caisse Noire · Saison 2026-27 · v2.9.3</span></div>
+      <div class="d-brand"><b>HBC PILAT SG</b><span>La Caisse Noire · Saison 2026-27 · v2.9.4</span></div>
       ${VIEWS.map(v=>`<button class="menu-item ${v.id===view?'on':''}" onclick="setView('${v.id}')">
         <span>${v.label}</span>${v.badge?`<span class="badge">${v.badge}</span>`:""}</button>`).join("")}
       <div style="border-top:1.5px solid var(--line);margin-top:10px;padding-top:8px">
@@ -620,7 +620,9 @@ function renderCompte(){
   const s = solde(AUTH.id);
   const pend = paiements.find(p=>p.joueur_id===AUTH.id && p.statut==="pending");
   out += `
-    <div class="section-label">Mon compte</div>
+    <div class="section-label" style="display:flex;justify-content:space-between;align-items:baseline">Mon compte
+      <span style="font-size:12px;letter-spacing:0;text-transform:none;font-weight:700;color:var(--bleu);cursor:pointer" onclick="ficheJoueur('${AUTH.id}')">📋 Ma fiche complète ›</span>
+    </div>
     <div class="ticket" style="text-align:center;padding:22px 16px 18px">
       <div style="font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--txt-dim)">${s<0?"Mon avoir":"Mon solde à payer"}</div>
       <div style="font-family:'Archivo Black';font-size:42px;line-height:1.1;color:${s>0?"var(--amende)":"var(--billet)"}">${s<0?Math.abs(s):s} €</div>
@@ -1087,7 +1089,7 @@ async function supprimerJoueur(id, nom){
 }
 
 function ficheJoueur(id){
-  if(!isGest()) return;
+  if(!isGest() && id !== AUTH.id) return;
   const j = joueursAll.find(x=>x.id===id); if(!j) return;
   const mesA = amendes.filter(a=>a.joueur_id===id)
     .sort((x,y)=>(y.date_amende||"").localeCompare(x.date_amende||""));
@@ -1133,7 +1135,7 @@ function ficheJoueur(id){
       ${chip((s<0?Math.abs(s):s)+" €", s<0?"avoir":"solde actuel", s>0?"var(--amende)":"var(--billet)")}
     </div>
     <div style="text-align:center;font-size:11.5px;color:var(--txt-dim);margin-bottom:10px">
-      ${totAmendes} € d'amendes − ${totCredits} € de tables − ${totPayes} € payés = <b>${s} €</b>
+      ${totAmendes} € d'amendes − ${totCredits} € de crédits − ${totPayes} € payés = <b>${s} €</b>
     </div>
     <div style="display:flex;gap:7px;margin-bottom:14px">
       ${chip(nbTable,"tables de marque","var(--bleu-fonce)")}
