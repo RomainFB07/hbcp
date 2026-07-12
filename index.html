@@ -268,7 +268,7 @@ const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 /* Le pseudo paypal.me du club (https://paypal.me/hbcpsg) */
 const PAY_CONFIG = {
   paypalUser: "hbcpsg",
-  revolutUser: "hbcpsg",   /* Revtag du compte Revolut du club (revolut.me/hbcpsg) */
+  weroEmail: "hbcpsg@gmail.com",   /* E-mail Wero du club (compte Revolut, à associer dans les réglages Wero) */
 };
 const CREDIT_TABLE = 2;   // € de réduction par table de marque validée
 const VAPID_PUBLIC_KEY = "BPVFcXTkm9V68j15928aLbit_WyFK7qNHHwyf6J3Fcm89iIJNlGKy2nRN3qFh5ELZAEkTgOEWq5BkZBW4w1A7vE";
@@ -409,7 +409,7 @@ function render(){
   mn.innerHTML = `
     <div class="drawer-bg" id="drawerBg" onclick="closeMenu()"></div>
     <div class="drawer" id="drawer">
-      <div class="d-brand"><b>HBC PILAT SG</b><span>La Caisse Noire · Saison 2026-27 · v2.9.5</span></div>
+      <div class="d-brand"><b>HBC PILAT SG</b><span>La Caisse Noire · Saison 2026-27 · v2.9.6</span></div>
       ${VIEWS.map(v=>`<button class="menu-item ${v.id===view?'on':''}" onclick="setView('${v.id}')">
         <span>${v.label}</span>${v.badge?`<span class="badge">${v.badge}</span>`:""}</button>`).join("")}
       <div style="border-top:1.5px solid var(--line);margin-top:10px;padding-top:8px">
@@ -740,9 +740,9 @@ function openPayModal(){
       <div class="ico" style="background:#003087">PP</div>
       <div class="lbl"><b>PayPal — ${s} €</b><span>paypal.me · montant pré-rempli · « entre proches » = sans frais</span></div>
     </button>
-    <button class="pay-opt" id="optRevolut" onclick="choosePayment('revolut')">
-      <div class="ico" style="background:#191c1f">R</div>
-      <div class="lbl"><b>Revolut — ${s} €</b><span>revolut.me · gratuit entre comptes Revolut · saisis bien le montant exact</span></div>
+    <button class="pay-opt" id="optWero" onclick="choosePayment('wero')">
+      <div class="ico" style="background:#e5006d">W</div>
+      <div class="lbl"><b>Wero — ${s} €</b><span>virement instantané gratuit depuis ton appli bancaire · sans IBAN</span></div>
     </button>
     <button class="pay-opt" id="optCash" onclick="choosePayment('cash')">
       <div class="ico" style="background:var(--billet)">€</div>
@@ -756,22 +756,24 @@ function openPayModal(){
 function choosePayment(moyen){
   chosenMoyen = moyen;
   const s = solde(AUTH.id);
-  document.getElementById("optPaypal").style.borderColor  = moyen==="paypal"  ? "var(--bleu)" : "var(--line)";
-  document.getElementById("optRevolut").style.borderColor = moyen==="revolut" ? "var(--bleu)" : "var(--line)";
-  document.getElementById("optCash").style.borderColor    = moyen==="cash"    ? "var(--bleu)" : "var(--line)";
+  document.getElementById("optPaypal").style.borderColor = moyen==="paypal" ? "var(--bleu)" : "var(--line)";
+  document.getElementById("optWero").style.borderColor    = moyen==="wero"   ? "var(--bleu)" : "var(--line)";
+  document.getElementById("optCash").style.borderColor    = moyen==="cash"   ? "var(--bleu)" : "var(--line)";
   if(moyen==="paypal"){
     window.open(`https://paypal.me/${PAY_CONFIG.paypalUser}/${s}EUR`, "_blank");
     document.getElementById("payInstr").innerHTML =
       `1️⃣ Envoie <b>${s} €</b> dans PayPal (fenêtre ouverte)<br>
        2️⃣ Reviens ici et confirme 👇`;
     document.getElementById("btnConfirm").textContent = "✓ J'ai payé sur PayPal";
-  } else if(moyen==="revolut"){
-    window.open(`https://revolut.me/${PAY_CONFIG.revolutUser}`, "_blank");
+  } else if(moyen==="wero"){
     document.getElementById("payInstr").innerHTML =
-      `1️⃣ Dans Revolut (fenêtre ouverte), envoie <b>exactement ${s} €</b><br>
-       <span style="color:var(--amende);font-size:12.5px">⚠️ Le montant n'est pas pré-rempli : tape bien <b>${s} €</b> !</span><br>
-       2️⃣ Reviens ici et confirme 👇`;
-    document.getElementById("btnConfirm").textContent = "✓ J'ai payé sur Revolut";
+      `1️⃣ Ouvre <b>ton appli bancaire</b> (ou l'appli Wero) → « Envoyer de l'argent via Wero »<br>
+       2️⃣ Destinataire : <b>${PAY_CONFIG.weroEmail}</b>
+       <button onclick="navigator.clipboard.writeText(PAY_CONFIG.weroEmail).then(()=>toast('E-mail copié ✓'))" style="border:1px solid var(--line);background:#fff;border-radius:8px;padding:2px 8px;font-family:'Archivo';font-weight:700;font-size:11.5px;cursor:pointer;color:var(--bleu)">📋 copier</button><br>
+       3️⃣ Montant : <b>exactement ${s} €</b>
+       <span style="color:var(--amende);font-size:12.5px">(⚠️ pas pré-rempli, tape bien ${s} €)</span><br>
+       4️⃣ Reviens ici et confirme 👇`;
+    document.getElementById("btnConfirm").textContent = "✓ J'ai payé via Wero";
   } else {
     document.getElementById("payInstr").innerHTML =
       `Remets <b>${s} €</b> en espèces à <b>Romain, Fabio ou Kévin</b>.<br>
