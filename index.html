@@ -403,13 +403,14 @@ function render(){
     {id:"bareme",     label:"⚖️ Tarifs"},
   ];
   if(isGest()) VIEWS.push({id:"joueurs", label:"👥 Joueurs"});
+  if(isGest()) VIEWS.push({id:"werolog", label:"💶 Wero reçus"});
   const cur = VIEWS.find(v=>v.id===view) || VIEWS[0];
   const mn = document.getElementById("mainNav");
   mn.style.display = "flex";
   mn.innerHTML = `
     <div class="drawer-bg" id="drawerBg" onclick="closeMenu()"></div>
     <div class="drawer" id="drawer">
-      <div class="d-brand"><b>HBC PILAT SG</b><span>La Caisse Noire · Saison 2026-27 · v2.9.6</span></div>
+      <div class="d-brand"><b>HBC PILAT SG</b><span>La Caisse Noire · Saison 2026-27 · v2.9.7</span></div>
       ${VIEWS.map(v=>`<button class="menu-item ${v.id===view?'on':''}" onclick="setView('${v.id}')">
         <span>${v.label}</span>${v.badge?`<span class="badge">${v.badge}</span>`:""}</button>`).join("")}
       <div style="border-top:1.5px solid var(--line);margin-top:10px;padding-top:8px">
@@ -428,6 +429,7 @@ function render(){
   else if(view==="equipe") app.innerHTML = renderEquipe();
   else if(view==="paiements") app.innerHTML = renderPaiements();
   else if(view==="bareme") app.innerHTML = renderBareme();
+  else if(view==="werolog"){ app.innerHTML = `<div class="empty">Chargement…</div>`; chargerWeroLog(); }
   else app.innerHTML = renderJoueurs();
 }
 
@@ -1034,6 +1036,39 @@ function canManage(j){
   if(j.role==="super") return false;
   if(j.role==="gestionnaire") return isSuper();
   return isGest();
+}
+/* ---- journal des paiements Wero reçus (notifs Revolut via MacroDroid) ---- */
+let weroNotifs = [];
+async function chargerWeroLog(){
+  const {data, error} = await db.rpc("lister_notifs_wero", {p_token:AUTH.token});
+  if(error){ document.getElementById("app").innerHTML = `<div class="empty">⚠️ ${esc(error.message)}</div>`; return; }
+  weroNotifs = data || [];
+  document.getElementById("app").innerHTML = renderWeroLog();
+}
+function renderWeroLog(){
+  const aPointer = weroNotifs.filter(n=>!n.traite);
+  const pointes  = weroNotifs.filter(n=>n.traite);
+  const ligne = n => `
+    <div class="ticket"><div class="t-head">
+      <div style="flex:1;min-width:0">
+        <div class="t-motif" style="font-size:13.5px;word-break:break-word">${esc(n.texte_notif)}</div>
+        <div class="t-meta">reçu le ${fmtDMH(n.recu_le)}${n.traite && n.traite_par ? ` · pointé par ${esc(nomDe(n.traite_par))}` : ""}</div>
+      </div>
+      <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;flex:none">
+        ${n.montant != null ? `<div class="t-montant" style="color:var(--billet)">${n.montant} €</div>` : ""}
+        <button class="mini" style="border:0;background:none;cursor:pointer;font-family:'Archivo';font-weight:700;font-size:11.5px;color:${n.traite?"var(--txt-dim)":"var(--bleu)"};text-decoration:underline" onclick="pointerWero('${n.id}', ${n.traite?"false":"true"})">${n.traite?"dé-pointer":"✓ pointer"}</button>
+      </div>
+    </div></div>`;
+  return `
+    <div class="section-label">💶 Paiements Wero reçus</div>
+    <div class="empty" style="margin-bottom:10px">Flux automatique des notifications du compte Revolut du club. Pointe chaque paiement une fois rapproché d'une déclaration dans l'app ✓</div>
+    ${aPointer.length ? `<div class="section-label">À pointer (${aPointer.length})</div>` + aPointer.map(ligne).join("") : `<div class="empty">Rien à pointer 👌</div>`}
+    ${pointes.length ? `<div class="section-label" style="margin-top:14px">Pointés (${pointes.length})</div>` + pointes.map(ligne).join("") : ""}`;
+}
+async function pointerWero(id, traite){
+  const {error} = await db.rpc("pointer_notif_wero", {p_token:AUTH.token, p_id:id, p_traite:traite});
+  if(rpcError(error)) return;
+  await chargerWeroLog();
 }
 function renderJoueurs(){
   const actifs = joueursAll.filter(j=>j.actif);
