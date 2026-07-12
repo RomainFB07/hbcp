@@ -404,13 +404,14 @@ function render(){
   ];
   if(isGest()) VIEWS.push({id:"joueurs", label:"👥 Joueurs"});
   if(isGest()) VIEWS.push({id:"werolog", label:"💶 Wero reçus"});
+  if(isGest()) VIEWS.push({id:"compta", label:"📒 Comptabilité"});
   const cur = VIEWS.find(v=>v.id===view) || VIEWS[0];
   const mn = document.getElementById("mainNav");
   mn.style.display = "flex";
   mn.innerHTML = `
     <div class="drawer-bg" id="drawerBg" onclick="closeMenu()"></div>
     <div class="drawer" id="drawer">
-      <div class="d-brand"><b>HBC PILAT SG</b><span>La Caisse Noire · Saison 2026-27 · v2.9.7</span></div>
+      <div class="d-brand"><b>HBC PILAT SG</b><span>La Caisse Noire · Saison 2026-27 · v2.9.8</span></div>
       ${VIEWS.map(v=>`<button class="menu-item ${v.id===view?'on':''}" onclick="setView('${v.id}')">
         <span>${v.label}</span>${v.badge?`<span class="badge">${v.badge}</span>`:""}</button>`).join("")}
       <div style="border-top:1.5px solid var(--line);margin-top:10px;padding-top:8px">
@@ -430,6 +431,7 @@ function render(){
   else if(view==="paiements") app.innerHTML = renderPaiements();
   else if(view==="bareme") app.innerHTML = renderBareme();
   else if(view==="werolog"){ app.innerHTML = `<div class="empty">Chargement…</div>`; chargerWeroLog(); }
+  else if(view==="compta"){ app.innerHTML = `<div class="empty">Chargement…</div>`; chargerCompta(); }
   else app.innerHTML = renderJoueurs();
 }
 
@@ -1069,6 +1071,143 @@ async function pointerWero(id, traite){
   const {error} = await db.rpc("pointer_notif_wero", {p_token:AUTH.token, p_id:id, p_traite:traite});
   if(rpcError(error)) return;
   await chargerWeroLog();
+}
+/* ---- comptabilité de la caisse (gestionnaires) ---- */
+const CAISSES = {paypal:"PayPal", revolut:"Revolut", especes:"Espèces"};
+const MOYEN_VERS_CAISSE = {paypal:"paypal", wero:"revolut", cash:"especes"};
+let mouvements = [];
+async function chargerCompta(){
+  const {data, error} = await db.rpc("lister_mouvements", {p_token:AUTH.token});
+  if(error){ document.getElementById("app").innerHTML = `<div class="empty">⚠️ ${esc(error.message)}</div>`; return; }
+  mouvements = data || [];
+  document.getElementById("app").innerHTML = renderCompta();
+}
+function renderCompta(){
+  const entreesParMoyen = {paypal:0, wero:0, cash:0};
+  paiements.filter(p=>p.statut==="valide").forEach(p=>{
+    entreesParMoyen[p.moyen] = (entreesParMoyen[p.moyen]||0) + Number(p.montant);
+  });
+  const caisse = {paypal:0, revolut:0, especes:0};
+  Object.entries(entreesParMoyen).forEach(([m,v])=>{ caisse[MOYEN_VERS_CAISSE[m]||"especes"] += v; });
+  let sortiesTotal = 0; const sortiesParCaisse = {paypal:0, revolut:0, especes:0};
+  mouvements.forEach(m=>{
+    if(m.type==="depense"){
+      caisse[m.caisse_source] -= Number(m.montant);
+      sortiesParCaisse[m.caisse_source] += Number(m.montant);
+      sortiesTotal += Number(m.montant);
+    } else {
+      caisse[m.caisse_source] -= Number(m.montant);
+      caisse[m.caisse_dest] += Number(m.montant);
+    }
+  });
+  const r2 = v => Math.round(v*100)/100;
+  const entreesTotal = r2(Object.values(entreesParMoyen).reduce((a,b)=>a+b,0));
+  const enCaisse = r2(entreesTotal - sortiesTotal);
+  const chip = (val, lbl) => `
+    <div style="flex:1;background:var(--bleu-pale);border-radius:12px;padding:10px 6px;text-align:center;min-width:0">
+      <div style="font-family:'Archivo Black';font-size:17px;color:${val<0?"var(--amende)":"var(--bleu-fonce)"}">${r2(val)} €</div>
+      <div style="font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--txt-dim)">${lbl}</div>
+    </div>`;
+
+  /* livre chronologique : entrées (paiements validés) + mouvements */
+  const lignes = [];
+  paiements.filter(p=>p.statut==="valide").forEach(p=>lignes.push({
+    ts: p.valide_le || p.declare_le, sens: "+", montant: Number(p.montant),
+    txt: `Paiement ${esc(nomDe(p.joueur_id)||"?")}`,
+    sous: `${MOYENS[p.moyen]||"?"} → caisse ${CAISSES[MOYEN_VERS_CAISSE[p.moyen]]||"?"}`,
+    id: null
+  }));
+  mouvements.forEach(m=>lignes.push({
+    ts: m.cree_le, sens: m.type==="depense" ? "−" : "⇄", montant: Number(m.montant),
+    txt: m.type==="depense" ? esc(m.libelle||"Dépense") : `Transfert ${CAISSES[m.caisse_source]} → ${CAISSES[m.caisse_dest]}`,
+    sous: `${m.type==="depense" ? "depuis "+CAISSES[m.caisse_source]+" · " : ""}par ${esc(nomDe(m.cree_par)||"?")}`,
+    id: m.id
+  }));
+  lignes.sort((a,b)=>(b.ts||"").localeCompare(a.ts||""));
+
+  return `
+    <div class="section-label">📒 Comptabilité de la caisse</div>
+    <div class="ticket" style="padding:14px 12px;margin-bottom:8px">
+      <div style="text-align:center;margin-bottom:10px">
+        <div style="font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--txt-dim)">En caisse (toutes caisses)</div>
+        <div style="font-family:'Archivo Black';font-size:34px;color:${enCaisse<0?"var(--amende)":"var(--billet)"}">${enCaisse} €</div>
+      </div>
+      <div style="display:flex;gap:6px">
+        ${chip(caisse.paypal, "PayPal")}
+        ${chip(caisse.revolut, "Revolut")}
+        ${chip(caisse.especes, "Espèces")}
+      </div>
+      <div style="font-size:12px;color:var(--txt-dim);text-align:center;margin-top:10px">
+        Entré : <b>${entreesTotal} €</b> (PayPal ${r2(entreesParMoyen.paypal)} · Wero ${r2(entreesParMoyen.wero)} · Espèces ${r2(entreesParMoyen.cash)})<br>
+        Sorti : <b>${r2(sortiesTotal)} €</b> (PayPal ${r2(sortiesParCaisse.paypal)} · Revolut ${r2(sortiesParCaisse.revolut)} · Espèces ${r2(sortiesParCaisse.especes)})
+      </div>
+      <div style="display:flex;gap:8px;margin-top:12px">
+        <button class="btn btn-no" style="flex:1;font-size:13px" onclick="openDepenseModal()">− Déclarer une dépense</button>
+        <button class="btn btn-ok" style="flex:1;font-size:13px" onclick="openTransfertModal()">⇄ Déclarer un transfert</button>
+      </div>
+    </div>
+    <div class="section-label">Livre des mouvements (${lignes.length})</div>
+    ${lignes.length ? lignes.map(l=>`
+      <div class="ticket"><div class="t-head">
+        <div style="flex:1;min-width:0">
+          <div class="t-motif" style="font-size:14px">${l.txt}</div>
+          <div class="t-meta">${fmtDMH(l.ts)} · ${l.sous}</div>
+        </div>
+        <div style="display:flex;flex-direction:column;align-items:flex-end;gap:3px;flex:none">
+          <div class="t-montant" style="color:${l.sens==="+"?"var(--billet)":l.sens==="−"?"var(--amende)":"var(--txt-dim)"}">${l.sens} ${l.montant} €</div>
+          ${l.id ? `<button class="mini" style="border:0;background:none;cursor:pointer;font-family:'Archivo';font-weight:700;font-size:11px;color:var(--txt-dim);text-decoration:underline" onclick="supprimerMouvement('${l.id}')">suppr.</button>` : ""}
+        </div>
+      </div></div>`).join("")
+    : `<div class="empty">Aucun mouvement pour l'instant</div>`}`;
+}
+function selCaisse(id, defaut){
+  return `<select id="${id}" style="width:100%;padding:10px;border:1.5px solid var(--line);border-radius:10px;font-family:'Archivo';font-weight:700;font-size:14px;background:#fff">
+    ${Object.entries(CAISSES).map(([k,v])=>`<option value="${k}" ${k===defaut?"selected":""}>${v}</option>`).join("")}
+  </select>`;
+}
+function openDepenseModal(){
+  openSheet(`
+    <h3>− Déclarer une dépense</h3>
+    <p class="sub">Une sortie d'argent de la caisse (fûts, matériel…)</p>
+    <div class="field"><label>Libellé</label><input id="depLbl" placeholder="Ex : 2 fûts de bière" maxlength="80"></div>
+    <div class="field"><label>Montant (€)</label><input id="depMnt" type="number" inputmode="decimal" min="0.01" step="0.01" placeholder="Ex : 45.50"></div>
+    <div class="field"><label>Payée depuis</label>${selCaisse("depSrc","revolut")}</div>
+    <button class="btn btn-no btn-full" onclick="validerDepense()">Enregistrer la dépense</button>`);
+}
+async function validerDepense(){
+  const lbl=(document.getElementById("depLbl").value||"").trim();
+  const mnt=parseFloat(document.getElementById("depMnt").value);
+  const src=document.getElementById("depSrc").value;
+  if(lbl.length<2){ toast("Il faut un libellé !"); return; }
+  if(!(mnt>0)){ toast("Montant invalide"); return; }
+  const {error} = await db.rpc("declarer_mouvement", {p_token:AUTH.token, p_type:"depense", p_libelle:lbl, p_montant:mnt, p_source:src, p_dest:null});
+  if(rpcError(error)) return;
+  closeModal(); toast("Dépense enregistrée ✓"); await chargerCompta();
+}
+function openTransfertModal(){
+  openSheet(`
+    <h3>⇄ Déclarer un transfert</h3>
+    <p class="sub">Déplacement d'argent entre caisses (ex : PayPal → Revolut, dépôt d'espèces sur Revolut). Le total en caisse ne change pas.</p>
+    <div class="field"><label>Montant (€)</label><input id="trfMnt" type="number" inputmode="decimal" min="0.01" step="0.01" placeholder="Ex : 50"></div>
+    <div class="field"><label>Depuis</label>${selCaisse("trfSrc","paypal")}</div>
+    <div class="field"><label>Vers</label>${selCaisse("trfDst","revolut")}</div>
+    <button class="btn btn-ok btn-full" onclick="validerTransfert()">Enregistrer le transfert</button>`);
+}
+async function validerTransfert(){
+  const mnt=parseFloat(document.getElementById("trfMnt").value);
+  const src=document.getElementById("trfSrc").value;
+  const dst=document.getElementById("trfDst").value;
+  if(!(mnt>0)){ toast("Montant invalide"); return; }
+  if(src===dst){ toast("Les deux caisses doivent être différentes"); return; }
+  const {error} = await db.rpc("declarer_mouvement", {p_token:AUTH.token, p_type:"transfert", p_libelle:null, p_montant:mnt, p_source:src, p_dest:dst});
+  if(rpcError(error)) return;
+  closeModal(); toast("Transfert enregistré ✓"); await chargerCompta();
+}
+async function supprimerMouvement(id){
+  if(!confirm("Supprimer ce mouvement du livre ?\n(en cas d'erreur de saisie uniquement)")) return;
+  const {error} = await db.rpc("supprimer_mouvement", {p_token:AUTH.token, p_id:id});
+  if(rpcError(error)) return;
+  toast("Mouvement supprimé"); await chargerCompta();
 }
 function renderJoueurs(){
   const actifs = joueursAll.filter(j=>j.actif);
