@@ -268,6 +268,7 @@ const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 /* Le pseudo paypal.me du club (https://paypal.me/hbcpsg) */
 const PAY_CONFIG = {
   paypalUser: "hbcpsg",
+  revolutUser: "hbcpsg",   /* Revtag du compte Revolut du club (revolut.me/hbcpsg) */
 };
 const CREDIT_TABLE = 2;   // € de réduction par table de marque validée
 const VAPID_PUBLIC_KEY = "BPVFcXTkm9V68j15928aLbit_WyFK7qNHHwyf6J3Fcm89iIJNlGKy2nRN3qFh5ELZAEkTgOEWq5BkZBW4w1A7vE";
@@ -288,7 +289,7 @@ let chosenMoyen = null;
 
 const MOIS = ["JANV","FÉVR","MARS","AVR","MAI","JUIN","JUIL","AOÛT","SEPT","OCT","NOV","DÉC"];
 const MOIS_LONG = ["janvier","février","mars","avril","mai","juin","juillet","août","septembre","octobre","novembre","décembre"];
-const MOYENS = {paypal:"PayPal", cash:"Espèces", wero:"Wero", lydia:"Lydia"};
+const MOYENS = {paypal:"PayPal", revolut:"Revolut", cash:"Espèces", wero:"Wero", lydia:"Lydia"};
 const ROLES = {super:"SUPER GESTIONNAIRE", gestionnaire:"GESTIONNAIRE"};
 const SECTIONS = {
   casse_croute:{label:"Casse-croûte fin de match", color:"var(--bouffe)"},
@@ -408,7 +409,7 @@ function render(){
   mn.innerHTML = `
     <div class="drawer-bg" id="drawerBg" onclick="closeMenu()"></div>
     <div class="drawer" id="drawer">
-      <div class="d-brand"><b>HBC PILAT SG</b><span>La Caisse Noire · Saison 2026-27 · v2.9.4</span></div>
+      <div class="d-brand"><b>HBC PILAT SG</b><span>La Caisse Noire · Saison 2026-27 · v2.9.5</span></div>
       ${VIEWS.map(v=>`<button class="menu-item ${v.id===view?'on':''}" onclick="setView('${v.id}')">
         <span>${v.label}</span>${v.badge?`<span class="badge">${v.badge}</span>`:""}</button>`).join("")}
       <div style="border-top:1.5px solid var(--line);margin-top:10px;padding-top:8px">
@@ -739,6 +740,10 @@ function openPayModal(){
       <div class="ico" style="background:#003087">PP</div>
       <div class="lbl"><b>PayPal — ${s} €</b><span>paypal.me · montant pré-rempli · « entre proches » = sans frais</span></div>
     </button>
+    <button class="pay-opt" id="optRevolut" onclick="choosePayment('revolut')">
+      <div class="ico" style="background:#191c1f">R</div>
+      <div class="lbl"><b>Revolut — ${s} €</b><span>revolut.me · gratuit entre comptes Revolut · saisis bien le montant exact</span></div>
+    </button>
     <button class="pay-opt" id="optCash" onclick="choosePayment('cash')">
       <div class="ico" style="background:var(--billet)">€</div>
       <div class="lbl"><b>Espèces</b><span>À remettre en main propre à un gestionnaire</span></div>
@@ -751,14 +756,22 @@ function openPayModal(){
 function choosePayment(moyen){
   chosenMoyen = moyen;
   const s = solde(AUTH.id);
-  document.getElementById("optPaypal").style.borderColor = moyen==="paypal" ? "var(--bleu)" : "var(--line)";
-  document.getElementById("optCash").style.borderColor   = moyen==="cash"   ? "var(--bleu)" : "var(--line)";
+  document.getElementById("optPaypal").style.borderColor  = moyen==="paypal"  ? "var(--bleu)" : "var(--line)";
+  document.getElementById("optRevolut").style.borderColor = moyen==="revolut" ? "var(--bleu)" : "var(--line)";
+  document.getElementById("optCash").style.borderColor    = moyen==="cash"    ? "var(--bleu)" : "var(--line)";
   if(moyen==="paypal"){
     window.open(`https://paypal.me/${PAY_CONFIG.paypalUser}/${s}EUR`, "_blank");
     document.getElementById("payInstr").innerHTML =
       `1️⃣ Envoie <b>${s} €</b> dans PayPal (fenêtre ouverte)<br>
        2️⃣ Reviens ici et confirme 👇`;
     document.getElementById("btnConfirm").textContent = "✓ J'ai payé sur PayPal";
+  } else if(moyen==="revolut"){
+    window.open(`https://revolut.me/${PAY_CONFIG.revolutUser}`, "_blank");
+    document.getElementById("payInstr").innerHTML =
+      `1️⃣ Dans Revolut (fenêtre ouverte), envoie <b>exactement ${s} €</b><br>
+       <span style="color:var(--amende);font-size:12.5px">⚠️ Le montant n'est pas pré-rempli : tape bien <b>${s} €</b> !</span><br>
+       2️⃣ Reviens ici et confirme 👇`;
+    document.getElementById("btnConfirm").textContent = "✓ J'ai payé sur Revolut";
   } else {
     document.getElementById("payInstr").innerHTML =
       `Remets <b>${s} €</b> en espèces à <b>Romain, Fabio ou Kévin</b>.<br>
