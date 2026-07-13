@@ -341,7 +341,7 @@ function rpcError(error){
 async function loadAll(){
   const [eq, jo, ba, am, ma, ins, ap, pa, tm] = await Promise.all([
     db.from("equipes").select().order("nom"),
-    db.from("joueurs").select("id,nom,role,actif,en_attente").order("nom"),
+    db.from("joueurs").select("id,nom,role,actif,en_attente,dispense_cotisation").order("nom"),
     db.from("bareme").select().eq("actif",true).order("ordre"),
     db.from("amendes").select("*, joueurs!amendes_joueur_id_fkey(nom)").order("date_amende",{ascending:false}),
     db.from("matchs").select("*, equipes(nom,couleur), inscriptions(*, joueurs(nom))")
@@ -411,7 +411,7 @@ function render(){
   mn.innerHTML = `
     <div class="drawer-bg" id="drawerBg" onclick="closeMenu()"></div>
     <div class="drawer" id="drawer">
-      <div class="d-brand"><b>HBC PILAT SG</b><span>La Caisse Noire · Saison 2026-27 · v2.9.8</span></div>
+      <div class="d-brand"><b>HBC PILAT SG</b><span>La Caisse Noire · Saison 2026-27 · v2.9.9</span></div>
       ${VIEWS.map(v=>`<button class="menu-item ${v.id===view?'on':''}" onclick="setView('${v.id}')">
         <span>${v.label}</span>${v.badge?`<span class="badge">${v.badge}</span>`:""}</button>`).join("")}
       <div style="border-top:1.5px solid var(--line);margin-top:10px;padding-top:8px">
@@ -687,8 +687,10 @@ function renderCompte(){
 }
 
 function ligneAmende(a, withNom){
+  const estCotis = (a.motif||"").startsWith("Achat fûts");
+  const proprio = joueursAll.find(j=>j.id===a.joueur_id) || {};
   const annulable = isGest() && a.joueur_id !== AUTH.id
-    && !(a.motif||"").startsWith("Achat fûts");
+    && (!estCotis || proprio.dispense_cotisation);
   return `<div class="ticket"><div class="t-head">
     <div><div class="t-motif">${withNom?esc(a.joueurs?.nom||"?")+" — ":""}${esc(a.motif)}</div>
     <div class="t-meta">${fmtDM(a.date_amende)}</div></div>
@@ -1217,10 +1219,12 @@ function renderJoueurs(){
     <div class="bareme-row" ${dim?'style="opacity:.65"':''}>
       <span class="avatar" style="background:${dim?"#a7b6c4":avatarColor(j.nom)};width:28px;height:28px;border-radius:50%;flex:none;display:flex;align-items:center;justify-content:center;font-family:'Archivo Black';font-size:11px;color:#fff">${esc(j.nom.slice(0,2).toUpperCase())}</span>
       <div class="motif" style="cursor:pointer" onclick="ficheJoueur('${j.id}')">${esc(j.nom)}${j.id===AUTH.id?" (toi)":""} <span style="font-size:11px;color:var(--bleu)">fiche ›</span>
-        ${ROLES[j.role]?`<span class="gest-badge" style="margin-left:6px">${j.role==="super"?"SUPER":"GESTIONNAIRE"}</span>`:""}</div>
+        ${ROLES[j.role]?`<span class="gest-badge" style="margin-left:6px">${j.role==="super"?"SUPER":"GESTIONNAIRE"}</span>`:""}
+        ${j.dispense_cotisation?`<span style="margin-left:6px;font-size:10px;font-weight:800;letter-spacing:.04em;color:#fff;background:var(--attente);border-radius:6px;padding:2px 6px">🩹 DISPENSÉ</span>`:""}</div>
       ${canManage(j) ? (dim
         ? `<button class="mini" style="border:0;background:none;cursor:pointer;font-family:'Archivo';font-weight:700;font-size:12px;color:var(--billet)" onclick="gererJoueur('${j.id}','reactiver','${esc(j.nom)}')">Réactiver ↩</button>${isSuper()?`<button class="mini" style="border:0;background:none;cursor:pointer;font-family:'Archivo';font-weight:700;font-size:12px;color:var(--amende)" onclick="supprimerJoueur('${j.id}','${esc(j.nom)}')">Supprimer 🗑</button>`:""}`
         : `<button class="mini" style="border:0;background:none;cursor:pointer;font-family:'Archivo';font-weight:700;font-size:12px;color:var(--bleu)" onclick="resetPin('${j.id}','${esc(j.nom)}')">PIN ↺</button>
+           <button class="mini" style="border:0;background:none;cursor:pointer;font-family:'Archivo';font-weight:700;font-size:12px;color:${j.dispense_cotisation?"var(--billet)":"var(--attente)"}" onclick="basculerDispense('${j.id}','${esc(j.nom)}',${j.dispense_cotisation?"false":"true"})">${j.dispense_cotisation?"Réintégrer 💪":"Dispenser 🩹"}</button>
            <button class="mini" style="border:0;background:none;cursor:pointer;font-family:'Archivo';font-weight:700;font-size:12px;color:var(--amende)" onclick="retirerJoueur('${j.id}','${esc(j.nom)}')">Retirer ✕</button>`)
         : ""}
     </div>`;
@@ -1252,6 +1256,16 @@ async function traiterInscription(id, nom, decision){
   if(rpcError(error)) return;
   await loadAll(); render();
   toast(decision==="approuver" ? `${nom} rejoint l'équipe ! 🎉` : `Inscription de ${nom} refusée`);
+}
+async function basculerDispense(id, nom, dispense){
+  const msg = dispense
+    ? `Dispenser ${nom} de la cotisation mensuelle (blessure, absence longue) ?\n\nLa cotisation « Achat fûts de bière » ne lui sera plus appliquée tant qu'il est dispensé, et sa cotisation du mois en cours pourra être annulée.`
+    : `Réintégrer ${nom} ?\n\nLa cotisation mensuelle reprendra au 1er du mois prochain.`;
+  if(!confirm(msg)) return;
+  const {error} = await db.rpc("basculer_dispense", {p_token:AUTH.token, p_cible:id, p_dispense:dispense});
+  if(rpcError(error)) return;
+  await loadAll(); render();
+  toast(dispense ? `${nom} dispensé de cotisation 🩹` : `${nom} réintégré 💪`);
 }
 async function gererJoueur(id, action, nom){
   const {error} = await db.rpc("gerer_joueur", {p_token:AUTH.token, p_cible:id, p_action:action});
