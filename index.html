@@ -316,12 +316,29 @@ function esc(s){return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").repl
 const isGest  = () => AUTH && (AUTH.role==="gestionnaire" || AUTH.role==="super");
 const isSuper = () => AUTH && AUTH.role==="super";
 
-/* SOLDE d'un joueur = Σ amendes − Σ tables validées − Σ paiements validés */
-function solde(id){
-  const am = amendes.filter(a=>a.joueur_id===id).reduce((s,a)=>s+Number(a.montant),0);
+/* SOLDE (option A) = cotisations + max(0, autres amendes − crédits) − paiements
+   → les crédits d'engagement n'effacent JAMAIS la cotisation fûts */
+const estCotisation = a => (a.motif||"").startsWith("Achat fûts");
+function _parts(id){
+  const cotis  = amendes.filter(a=>a.joueur_id===id && estCotisation(a)).reduce((s,a)=>s+Number(a.montant),0);
+  const autres = amendes.filter(a=>a.joueur_id===id && !estCotisation(a)).reduce((s,a)=>s+Number(a.montant),0);
   const cr = tablesMarque.filter(t=>t.joueur_id===id && t.statut==="valide").reduce((s,t)=>s+Number(t.montant),0);
   const pa = paiements.filter(p=>p.joueur_id===id && p.statut==="valide").reduce((s,p)=>s+Number(p.montant),0);
-  return Math.round((am - cr - pa) * 100) / 100;
+  return {cotis, autres, cr, pa};
+}
+function solde(id){
+  const {cotis, autres, cr, pa} = _parts(id);
+  return Math.round((cotis + Math.max(0, autres - cr) - pa) * 100) / 100;
+}
+/* crédits en réserve = excédent de crédits sur les amendes-punitions */
+function reserveCredits(id){
+  const {autres, cr} = _parts(id);
+  return Math.round(Math.max(0, cr - autres) * 100) / 100;
+}
+/* répartition d'un joueur entre les deux pots : cotisation payée en priorité */
+function partFuts(id){
+  const {cotis, pa} = _parts(id);
+  return Math.round(Math.min(pa, cotis) * 100) / 100;
 }
 
 const nomDe = id => (joueursAll.find(j=>j.id===id)||{}).nom || "";
@@ -377,7 +394,9 @@ db.channel("caisse-noire")
    RENDU + MENU DÉROULANT
 ===================================================================== */
 function render(){
-  const caisse = paiements.filter(p=>p.statut==="valide").reduce((s,p)=>s+Number(p.montant),0);
+  const totalPaye = paiements.filter(p=>p.statut==="valide").reduce((s,p)=>s+Number(p.montant),0);
+  const totalFuts = joueursAll.reduce((s,j)=>s+partFuts(j.id),0);
+  const caisse = Math.round((totalPaye - totalFuts)*100)/100;
   document.getElementById("totalCaisse").textContent = caisse + " €";
 
   if(!AUTH){ renderOnboard(); return; }
@@ -396,6 +415,7 @@ function render(){
     {id:"amendes",    label:"💶 Mon compte"},
     {id:"matchs",     label:"📅 Matchs", badge:libres},
     {id:"aperos",     label:"🍻 Apéros du vendredi"},
+    {id:"futs",       label:"🍺 Fûts de bière"},
     {id:"classement", label:"🏆 Classement des payeurs"},
     {id:"engages",    label:"🤝 Les plus engagés"},
     {id:"equipe",     label:"💀 Amendes de l'équipe"},
@@ -411,7 +431,7 @@ function render(){
   mn.innerHTML = `
     <div class="drawer-bg" id="drawerBg" onclick="closeMenu()"></div>
     <div class="drawer" id="drawer">
-      <div class="d-brand"><b>HBC PILAT SG</b><span>La Caisse Noire · Saison 2026-27 · v2.9.9</span></div>
+      <div class="d-brand"><b>HBC PILAT SG</b><span>La Caisse Noire · Saison 2026-27 · v2.10</span></div>
       ${VIEWS.map(v=>`<button class="menu-item ${v.id===view?'on':''}" onclick="setView('${v.id}')">
         <span>${v.label}</span>${v.badge?`<span class="badge">${v.badge}</span>`:""}</button>`).join("")}
       <div style="border-top:1.5px solid var(--line);margin-top:10px;padding-top:8px">
@@ -430,6 +450,7 @@ function render(){
   else if(view==="equipe") app.innerHTML = renderEquipe();
   else if(view==="paiements") app.innerHTML = renderPaiements();
   else if(view==="bareme") app.innerHTML = renderBareme();
+  else if(view==="futs"){ app.innerHTML = `<div class="empty">Chargement…</div>`; chargerFuts(); }
   else if(view==="werolog"){ app.innerHTML = `<div class="empty">Chargement…</div>`; chargerWeroLog(); }
   else if(view==="compta"){ app.innerHTML = `<div class="empty">Chargement…</div>`; chargerCompta(); }
   else app.innerHTML = renderJoueurs();
@@ -591,9 +612,10 @@ function renderCompte(){
     if(now.getDate() >= 11){
       const monthStart = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}-01`;
       const retards = joueurs.map(j=>{
-        const duAvant = amendes.filter(a=>a.joueur_id===j.id && a.date_amende < monthStart)
-                          .reduce((s,a)=>s+Number(a.montant),0)
-          - tablesMarque.filter(t=>t.joueur_id===j.id && t.statut==="valide").reduce((s,t)=>s+Number(t.montant),0)
+        const avCotis  = amendes.filter(a=>a.joueur_id===j.id && a.date_amende < monthStart && estCotisation(a)).reduce((s,a)=>s+Number(a.montant),0);
+        const avAutres = amendes.filter(a=>a.joueur_id===j.id && a.date_amende < monthStart && !estCotisation(a)).reduce((s,a)=>s+Number(a.montant),0);
+        const duAvant = avCotis + Math.max(0, avAutres
+          - tablesMarque.filter(t=>t.joueur_id===j.id && t.statut==="valide").reduce((s,t)=>s+Number(t.montant),0))
           - paiements.filter(p=>p.joueur_id===j.id && p.statut==="valide").reduce((s,p)=>s+Number(p.montant),0);
         const deja = amendes.some(a=>a.joueur_id===j.id
           && a.motif==="Retard de paiement mensuel" && a.date_amende >= monthStart);
@@ -631,7 +653,8 @@ function renderCompte(){
     <div class="ticket" style="text-align:center;padding:22px 16px 18px">
       <div style="font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--txt-dim)">${s<0?"Mon avoir":"Mon solde à payer"}</div>
       <div style="font-family:'Archivo Black';font-size:42px;line-height:1.1;color:${s>0?"var(--amende)":"var(--billet)"}">${s<0?Math.abs(s):s} €</div>
-      ${s<0?`<div style="font-size:12.5px;color:var(--billet);font-weight:600;margin-top:2px">Grâce à ton engagement dans l'équipe, tes prochaines amendes seront déduites de cet avoir 😎</div>`:""}
+      ${s<0?`<div style="font-size:12.5px;color:var(--billet);font-weight:600;margin-top:2px">Trop-perçu : tes prochains montants dus seront déduits de cet avoir 😎</div>`:""}
+      ${reserveCredits(AUTH.id)>0?`<div style="font-size:12.5px;color:var(--billet);font-weight:600;margin-top:4px">🎁 Crédits en réserve : ${reserveCredits(AUTH.id)} € — déduits de tes prochaines amendes (jamais de la cotisation fûts 🍺)</div>`:""}
       ${pend ? `<div style="font-size:13px;color:var(--attente);font-weight:700;margin-top:4px">⏳ Paiement de ${pend.montant} € en attente de validation</div>` : ""}
       <div style="display:flex;gap:8px;margin-top:14px;align-items:stretch">
         <button class="btn btn-pay" style="flex:1;height:auto" ${s>0 && !pend ? `onclick="openPayModal()"` : "disabled style='flex:1;height:auto;opacity:.45;cursor:default'"}>💳 Payer<br>mon solde</button>
@@ -1074,6 +1097,40 @@ async function pointerWero(id, traite){
   if(rpcError(error)) return;
   await chargerWeroLog();
 }
+/* ---- fûts de bière (vue publique) ---- */
+let depensesFuts = [];
+async function chargerFuts(){
+  const {data, error} = await db.rpc("lister_depenses_futs", {p_token:AUTH.token});
+  if(error){ document.getElementById("app").innerHTML = `<div class="empty">⚠️ ${esc(error.message)}</div>`; return; }
+  depensesFuts = data || [];
+  document.getElementById("app").innerHTML = renderFuts();
+}
+function renderFuts(){
+  const collecte = Math.round(joueursAll.reduce((s,j)=>s+partFuts(j.id),0)*100)/100;
+  const depense = Math.round(depensesFuts.reduce((s,m)=>s+Number(m.montant),0)*100)/100;
+  const dispo = Math.round((collecte - depense)*100)/100;
+  return `
+    <div class="section-label">🍺 La cagnotte fûts de bière</div>
+    <div class="ticket" style="text-align:center;padding:22px 16px 18px;margin-bottom:8px">
+      <div style="font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--txt-dim)">Dans la cagnotte</div>
+      <div style="font-family:'Archivo Black';font-size:44px;line-height:1.1;color:${dispo<0?"var(--amende)":"var(--billet)"}">${dispo} €</div>
+      <div style="font-size:12.5px;color:var(--txt-dim);margin-top:6px">
+        ${collecte} € de cotisations encaissées · ${depense} € de fûts achetés
+      </div>
+    </div>
+    <div class="empty" style="margin-bottom:10px">
+      🍺 Alimentée par la cotisation de 3 €/mois de chaque joueur (septembre → juin). Les crédits d'engagement ne la réduisent jamais — la bière, c'est sacré.
+    </div>
+    <div class="section-label">Les fûts achetés (${depensesFuts.length})</div>
+    ${depensesFuts.length ? depensesFuts.map(m=>`
+      <div class="ticket"><div class="t-head">
+        <div><div class="t-motif" style="font-size:14px">${esc(m.libelle||"Achat de fûts")}</div>
+        <div class="t-meta">le ${fmtDM(m.cree_le)}</div></div>
+        <div class="t-montant" style="color:var(--amende)">− ${m.montant} €</div>
+      </div></div>`).join("")
+    : `<div class="empty">Aucun fût acheté pour l'instant… ça ne saurait tarder 🍻</div>`}`;
+}
+
 /* ---- comptabilité de la caisse (gestionnaires) ---- */
 const CAISSES = {paypal:"PayPal", revolut:"Revolut", especes:"Espèces"};
 const MOYEN_VERS_CAISSE = {paypal:"paypal", wero:"revolut", cash:"especes"};
@@ -1084,11 +1141,14 @@ async function chargerCompta(){
   mouvements = data || [];
   document.getElementById("app").innerHTML = renderCompta();
 }
+const POTS = {futs:"🍺 Fûts", caisse:"💀 Caisse noire"};
 function renderCompta(){
   const entreesParMoyen = {paypal:0, wero:0, cash:0};
   paiements.filter(p=>p.statut==="valide").forEach(p=>{
     entreesParMoyen[p.moyen] = (entreesParMoyen[p.moyen]||0) + Number(p.montant);
   });
+  /* ventilation par pot (cotisation payée en priorité) */
+  const potFutsIn = Math.round(joueursAll.reduce((s,j)=>s+partFuts(j.id),0)*100)/100;
   const caisse = {paypal:0, revolut:0, especes:0};
   Object.entries(entreesParMoyen).forEach(([m,v])=>{ caisse[MOYEN_VERS_CAISSE[m]||"especes"] += v; });
   let sortiesTotal = 0; const sortiesParCaisse = {paypal:0, revolut:0, especes:0};
@@ -1105,6 +1165,9 @@ function renderCompta(){
   const r2 = v => Math.round(v*100)/100;
   const entreesTotal = r2(Object.values(entreesParMoyen).reduce((a,b)=>a+b,0));
   const enCaisse = r2(entreesTotal - sortiesTotal);
+  const potCaisseIn = r2(entreesTotal - potFutsIn);
+  const potFutsOut  = r2(mouvements.filter(m=>m.type==="depense" && m.pot==="futs").reduce((s,m)=>s+Number(m.montant),0));
+  const potCaisseOut= r2(mouvements.filter(m=>m.type==="depense" && m.pot!=="futs").reduce((s,m)=>s+Number(m.montant),0));
   const chip = (val, lbl) => `
     <div style="flex:1;background:var(--bleu-pale);border-radius:12px;padding:10px 6px;text-align:center;min-width:0">
       <div style="font-family:'Archivo Black';font-size:17px;color:${val<0?"var(--amende)":"var(--bleu-fonce)"}">${r2(val)} €</div>
@@ -1121,8 +1184,8 @@ function renderCompta(){
   }));
   mouvements.forEach(m=>lignes.push({
     ts: m.cree_le, sens: m.type==="depense" ? "−" : "⇄", montant: Number(m.montant),
-    txt: m.type==="depense" ? esc(m.libelle||"Dépense") : `Transfert ${CAISSES[m.caisse_source]} → ${CAISSES[m.caisse_dest]}`,
-    sous: `${m.type==="depense" ? "depuis "+CAISSES[m.caisse_source]+" · " : ""}par ${esc(nomDe(m.cree_par)||"?")}`,
+    txt: m.type==="depense" ? `${m.pot==="futs"?"🍺 ":"💀 "}${esc(m.libelle||"Dépense")}` : `Transfert ${CAISSES[m.caisse_source]} → ${CAISSES[m.caisse_dest]}`,
+    sous: `${m.type==="depense" ? "pot "+(POTS[m.pot]||m.pot)+" · depuis "+CAISSES[m.caisse_source]+" · " : ""}par ${esc(nomDe(m.cree_par)||"?")}`,
     id: m.id
   }));
   lignes.sort((a,b)=>(b.ts||"").localeCompare(a.ts||""));
@@ -1142,6 +1205,18 @@ function renderCompta(){
       <div style="font-size:12px;color:var(--txt-dim);text-align:center;margin-top:10px">
         Entré : <b>${entreesTotal} €</b> (PayPal ${r2(entreesParMoyen.paypal)} · Wero ${r2(entreesParMoyen.wero)} · Espèces ${r2(entreesParMoyen.cash)})<br>
         Sorti : <b>${r2(sortiesTotal)} €</b> (PayPal ${r2(sortiesParCaisse.paypal)} · Revolut ${r2(sortiesParCaisse.revolut)} · Espèces ${r2(sortiesParCaisse.especes)})
+      </div>
+      <div style="display:flex;gap:6px;margin-top:10px">
+        <div style="flex:1;background:#fdf3e3;border-radius:12px;padding:8px 6px;text-align:center">
+          <div style="font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--txt-dim)">🍺 Pot Fûts</div>
+          <div style="font-family:'Archivo Black';font-size:15px;color:var(--bleu-fonce)">${r2(potFutsIn - potFutsOut)} €</div>
+          <div style="font-size:10.5px;color:var(--txt-dim)">+${potFutsIn} · −${potFutsOut}</div>
+        </div>
+        <div style="flex:1;background:var(--bleu-pale);border-radius:12px;padding:8px 6px;text-align:center">
+          <div style="font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--txt-dim)">💀 Pot Caisse noire</div>
+          <div style="font-family:'Archivo Black';font-size:15px;color:var(--bleu-fonce)">${r2(potCaisseIn - potCaisseOut)} €</div>
+          <div style="font-size:10.5px;color:var(--txt-dim)">+${potCaisseIn} · −${potCaisseOut}</div>
+        </div>
       </div>
       <div style="display:flex;gap:8px;margin-top:12px">
         <button class="btn btn-no" style="flex:1;font-size:13px" onclick="openDepenseModal()">− Déclarer une dépense</button>
@@ -1174,6 +1249,11 @@ function openDepenseModal(){
     <div class="field"><label>Libellé</label><input id="depLbl" placeholder="Ex : 2 fûts de bière" maxlength="80"></div>
     <div class="field"><label>Montant (€)</label><input id="depMnt" type="number" inputmode="decimal" min="0.01" step="0.01" placeholder="Ex : 45.50"></div>
     <div class="field"><label>Payée depuis</label>${selCaisse("depSrc","revolut")}</div>
+    <div class="field"><label>Sur le pot</label>
+      <select id="depPot" style="width:100%;padding:10px;border:1.5px solid var(--line);border-radius:10px;font-family:'Archivo';font-weight:700;font-size:14px;background:#fff">
+        <option value="futs">🍺 Fûts de bière</option>
+        <option value="caisse">💀 Caisse noire (cohésion, matériel…)</option>
+      </select></div>
     <button class="btn btn-no btn-full" onclick="validerDepense()">Enregistrer la dépense</button>`);
 }
 async function validerDepense(){
@@ -1182,7 +1262,8 @@ async function validerDepense(){
   const src=document.getElementById("depSrc").value;
   if(lbl.length<2){ toast("Il faut un libellé !"); return; }
   if(!(mnt>0)){ toast("Montant invalide"); return; }
-  const {error} = await db.rpc("declarer_mouvement", {p_token:AUTH.token, p_type:"depense", p_libelle:lbl, p_montant:mnt, p_source:src, p_dest:null});
+  const pot=document.getElementById("depPot").value;
+  const {error} = await db.rpc("declarer_mouvement", {p_token:AUTH.token, p_type:"depense", p_libelle:lbl, p_montant:mnt, p_source:src, p_dest:null, p_pot:pot});
   if(rpcError(error)) return;
   closeModal(); toast("Dépense enregistrée ✓"); await chargerCompta();
 }
@@ -1201,7 +1282,7 @@ async function validerTransfert(){
   const dst=document.getElementById("trfDst").value;
   if(!(mnt>0)){ toast("Montant invalide"); return; }
   if(src===dst){ toast("Les deux caisses doivent être différentes"); return; }
-  const {error} = await db.rpc("declarer_mouvement", {p_token:AUTH.token, p_type:"transfert", p_libelle:null, p_montant:mnt, p_source:src, p_dest:dst});
+  const {error} = await db.rpc("declarer_mouvement", {p_token:AUTH.token, p_type:"transfert", p_libelle:null, p_montant:mnt, p_source:src, p_dest:dst, p_pot:null});
   if(rpcError(error)) return;
   closeModal(); toast("Transfert enregistré ✓"); await chargerCompta();
 }
@@ -1338,7 +1419,7 @@ function ficheJoueur(id){
       ${chip((s<0?Math.abs(s):s)+" €", s<0?"avoir":"solde actuel", s>0?"var(--amende)":"var(--billet)")}
     </div>
     <div style="text-align:center;font-size:11.5px;color:var(--txt-dim);margin-bottom:10px">
-      ${totAmendes} € d'amendes − ${totCredits} € de crédits − ${totPayes} € payés = <b>${s} €</b>
+      ${(()=>{const pt=_parts(id);return `${pt.cotis} € de cotisations + max(0, ${pt.autres} € d'amendes − ${pt.cr} € de crédits) − ${pt.pa} € payés = <b>${s} €</b>${reserveCredits(id)>0?` · 🎁 réserve ${reserveCredits(id)} €`:""}`})()}
     </div>
     <div style="display:flex;gap:7px;margin-bottom:14px">
       ${chip(nbTable,"tables de marque","var(--bleu-fonce)")}
