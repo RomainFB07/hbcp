@@ -431,7 +431,7 @@ function render(){
   mn.innerHTML = `
     <div class="drawer-bg" id="drawerBg" onclick="closeMenu()"></div>
     <div class="drawer" id="drawer">
-      <div class="d-brand"><b>HBC PILAT SG</b><span>La Caisse Noire · Saison 2026-27 · v2.10</span></div>
+      <div class="d-brand"><b>HBC PILAT SG</b><span>La Caisse Noire · Saison 2026-27 · v2.10.1</span></div>
       ${VIEWS.map(v=>`<button class="menu-item ${v.id===view?'on':''}" onclick="setView('${v.id}')">
         <span>${v.label}</span>${v.badge?`<span class="badge">${v.badge}</span>`:""}</button>`).join("")}
       <div style="border-top:1.5px solid var(--line);margin-top:10px;padding-top:8px">
@@ -1119,7 +1119,7 @@ function renderFuts(){
       </div>
     </div>
     <div class="empty" style="margin-bottom:10px">
-      🍺 Alimentée par la cotisation de 3 €/mois de chaque joueur (septembre → juin). Les crédits d'engagement ne la réduisent jamais — la bière, c'est sacré.
+      🍺 Alimentée par la cotisation de 3 €/mois de chaque joueur (tous les mois sauf juillet). Les crédits d'engagement ne la réduisent jamais — la bière, c'est sacré.
     </div>
     <div class="section-label">Les fûts achetés (${depensesFuts.length})</div>
     ${depensesFuts.length ? depensesFuts.map(m=>`
