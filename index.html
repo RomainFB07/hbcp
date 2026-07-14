@@ -431,7 +431,7 @@ function render(){
   mn.innerHTML = `
     <div class="drawer-bg" id="drawerBg" onclick="closeMenu()"></div>
     <div class="drawer" id="drawer">
-      <div class="d-brand"><b>HBC PILAT SG</b><span>La Caisse Noire · Saison 2026-27 · v2.10.1</span></div>
+      <div class="d-brand"><b>HBC PILAT SG</b><span>La Caisse Noire · Saison 2026-27 · v2.10.2</span></div>
       ${VIEWS.map(v=>`<button class="menu-item ${v.id===view?'on':''}" onclick="setView('${v.id}')">
         <span>${v.label}</span>${v.badge?`<span class="badge">${v.badge}</span>`:""}</button>`).join("")}
       <div style="border-top:1.5px solid var(--line);margin-top:10px;padding-top:8px">
@@ -665,7 +665,8 @@ function renderCompte(){
         </div>
       </div>
       <div style="font-size:12px;color:var(--txt-dim);margin-top:12px">
-        Tous les engagements auprès de l'équipe sont récompensés par un avoir de ${CREDIT_TABLE} € 💪
+        Tous les engagements auprès de l'équipe sont récompensés par un avoir de ${CREDIT_TABLE} € 💪<br>
+        Attention : ces avoirs ne déduisent jamais la cotisation obligatoire « Achat fûts de bière » 🍺
       </div>
     </div>
     <div class="empty" style="margin-bottom:12px">
@@ -989,7 +990,7 @@ function renderBareme(){
         <span style="font-family:'Archivo Black';font-size:17px;color:var(--billet)">−${CREDIT_TABLE} €</span>
       </div>
       <div class="empty" style="margin-top:14px">
-        Le tarif officiel de la caisse noire, fixé par les gestionnaires.
+        Le tarif officiel de la caisse noire.
         Maintenant tu sais ce que ça coûte 😉
       </div>`;
   }
