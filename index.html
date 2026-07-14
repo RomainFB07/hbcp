@@ -317,8 +317,10 @@ const isGest  = () => AUTH && (AUTH.role==="gestionnaire" || AUTH.role==="super"
 const isSuper = () => AUTH && AUTH.role==="super";
 
 /* SOLDE (option A) = cotisations + max(0, autres amendes − crédits) − paiements
-   → les crédits d'engagement n'effacent JAMAIS la cotisation fûts */
-const estCotisation = a => (a.motif||"").startsWith("Achat fûts");
+   → les crédits d'engagement n'effacent JAMAIS la cotisation boissons
+   NB : la cotisation est reconnue par « (cotisation mensuelle) » dans son
+   libellé — ne jamais créer d'autre motif de barème contenant ces mots. */
+const estCotisation = a => (a.motif||"").includes("cotisation mensuelle");
 function _parts(id){
   const cotis  = amendes.filter(a=>a.joueur_id===id && estCotisation(a)).reduce((s,a)=>s+Number(a.montant),0);
   const autres = amendes.filter(a=>a.joueur_id===id && !estCotisation(a)).reduce((s,a)=>s+Number(a.montant),0);
@@ -415,7 +417,7 @@ function render(){
     {id:"amendes",    label:"💶 Mon compte"},
     {id:"matchs",     label:"📅 Matchs", badge:libres},
     {id:"aperos",     label:"🍻 Apéros du vendredi"},
-    {id:"futs",       label:"🍺 Fûts de bière"},
+    {id:"futs",       label:"🍺 Bière & softs"},
     {id:"classement", label:"🏆 Classement des payeurs"},
     {id:"engages",    label:"🤝 Les plus engagés"},
     {id:"equipe",     label:"💀 Amendes de l'équipe"},
@@ -431,7 +433,7 @@ function render(){
   mn.innerHTML = `
     <div class="drawer-bg" id="drawerBg" onclick="closeMenu()"></div>
     <div class="drawer" id="drawer">
-      <div class="d-brand"><b>HBC PILAT SG</b><span>La Caisse Noire · Saison 2026-27 · v2.10.2</span></div>
+      <div class="d-brand"><b>HBC PILAT SG</b><span>La Caisse Noire · Saison 2026-27 · v2.10.3</span></div>
       ${VIEWS.map(v=>`<button class="menu-item ${v.id===view?'on':''}" onclick="setView('${v.id}')">
         <span>${v.label}</span>${v.badge?`<span class="badge">${v.badge}</span>`:""}</button>`).join("")}
       <div style="border-top:1.5px solid var(--line);margin-top:10px;padding-top:8px">
@@ -640,7 +642,7 @@ function renderCompte(){
   const moisPrec = MOIS_LONG[(mois+11)%12];
   const moisCour = MOIS_LONG[mois];
   const moisSuiv = MOIS_LONG[(mois+1)%12];
-  const cotisMontant = (bareme.find(b=>(b.motif||"").startsWith("Achat fûts"))||{}).montant ?? 3;
+  const cotisMontant = (bareme.find(b=>(b.motif||"").includes("cotisation mensuelle"))||{}).montant ?? 3;
   const deadlineTxt = jour <= 10
     ? `📆 Le solde de <b>${moisPrec}</b> est à régler <b>avant le 10 ${moisCour}</b>. Passé ce délai : majoration de 2 €.`
     : `📆 Le solde de <b>${moisCour}</b> sera à régler <b>avant le 10 ${moisSuiv}</b>. Retard = majoration de 2 €.`;
@@ -654,7 +656,7 @@ function renderCompte(){
       <div style="font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--txt-dim)">${s<0?"Mon avoir":"Mon solde à payer"}</div>
       <div style="font-family:'Archivo Black';font-size:42px;line-height:1.1;color:${s>0?"var(--amende)":"var(--billet)"}">${s<0?Math.abs(s):s} €</div>
       ${s<0?`<div style="font-size:12.5px;color:var(--billet);font-weight:600;margin-top:2px">Trop-perçu : tes prochains montants dus seront déduits de cet avoir 😎</div>`:""}
-      ${reserveCredits(AUTH.id)>0?`<div style="font-size:12.5px;color:var(--billet);font-weight:600;margin-top:4px">🎁 Crédits en réserve : ${reserveCredits(AUTH.id)} € — déduits de tes prochaines amendes (jamais de la cotisation fûts 🍺)</div>`:""}
+      ${reserveCredits(AUTH.id)>0?`<div style="font-size:12.5px;color:var(--billet);font-weight:600;margin-top:4px">🎁 Crédits en réserve : ${reserveCredits(AUTH.id)} € — déduits de tes prochaines amendes (jamais de la cotisation bière & softs 🍺)</div>`:""}
       ${pend ? `<div style="font-size:13px;color:var(--attente);font-weight:700;margin-top:4px">⏳ Paiement de ${pend.montant} € en attente de validation</div>` : ""}
       <div style="display:flex;gap:8px;margin-top:14px;align-items:stretch">
         <button class="btn btn-pay" style="flex:1;height:auto" ${s>0 && !pend ? `onclick="openPayModal()"` : "disabled style='flex:1;height:auto;opacity:.45;cursor:default'"}>💳 Payer<br>mon solde</button>
@@ -666,12 +668,12 @@ function renderCompte(){
       </div>
       <div style="font-size:12px;color:var(--txt-dim);margin-top:12px">
         Tous les engagements auprès de l'équipe sont récompensés par un avoir de ${CREDIT_TABLE} € 💪<br>
-        Attention : ces avoirs ne déduisent jamais la cotisation obligatoire « Achat fûts de bière » 🍺
+        Attention : ces avoirs ne déduisent jamais la cotisation obligatoire « Achat bière + softs » 🍺
       </div>
     </div>
     <div class="empty" style="margin-bottom:12px">
       ${deadlineTxt}<br>
-      🍺 Chaque 1er du mois : cotisation de ${cotisMontant} € obligatoire pour « Achat fûts de bière », ajoutée automatiquement au solde de chacun.
+      🍺 Chaque 1er du mois (sauf juillet) : cotisation de ${cotisMontant} € obligatoire pour « Achat bière + softs », ajoutée automatiquement au solde de chacun.
     </div>`;
 
   /* ---- mes engagements récompensés ---- */
@@ -711,7 +713,7 @@ function renderCompte(){
 }
 
 function ligneAmende(a, withNom){
-  const estCotis = (a.motif||"").startsWith("Achat fûts");
+  const estCotis = estCotisation(a);
   const proprio = joueursAll.find(j=>j.id===a.joueur_id) || {};
   const annulable = isGest() && a.joueur_id !== AUTH.id
     && (!estCotis || proprio.dispense_cotisation);
@@ -1098,7 +1100,7 @@ async function pointerWero(id, traite){
   if(rpcError(error)) return;
   await chargerWeroLog();
 }
-/* ---- fûts de bière (vue publique) ---- */
+/* ---- bière & softs (vue publique) ---- */
 let depensesFuts = [];
 async function chargerFuts(){
   const {data, error} = await db.rpc("lister_depenses_futs", {p_token:AUTH.token});
@@ -1111,25 +1113,25 @@ function renderFuts(){
   const depense = Math.round(depensesFuts.reduce((s,m)=>s+Number(m.montant),0)*100)/100;
   const dispo = Math.round((collecte - depense)*100)/100;
   return `
-    <div class="section-label">🍺 La cagnotte fûts de bière</div>
+    <div class="section-label">🍺 La cagnotte bière & softs</div>
     <div class="ticket" style="text-align:center;padding:22px 16px 18px;margin-bottom:8px">
       <div style="font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--txt-dim)">Dans la cagnotte</div>
       <div style="font-family:'Archivo Black';font-size:44px;line-height:1.1;color:${dispo<0?"var(--amende)":"var(--billet)"}">${dispo} €</div>
       <div style="font-size:12.5px;color:var(--txt-dim);margin-top:6px">
-        ${collecte} € de cotisations encaissées · ${depense} € de fûts achetés
+        ${collecte} € de cotisations encaissées · ${depense} € de boissons achetées
       </div>
     </div>
     <div class="empty" style="margin-bottom:10px">
-      🍺 Alimentée par la cotisation de 3 €/mois de chaque joueur (tous les mois sauf juillet). Les crédits d'engagement ne la réduisent jamais — la bière, c'est sacré.
+      🍺 Alimentée par la cotisation de 3 €/mois de chaque joueur (tous les mois sauf juillet). Elle finance les fûts ET les softs — chacun y trouve son compte. Les crédits d'engagement ne la réduisent jamais : l'apéro d'équipe, c'est sacré.
     </div>
-    <div class="section-label">Les fûts achetés (${depensesFuts.length})</div>
+    <div class="section-label">Les boissons achetées (${depensesFuts.length})</div>
     ${depensesFuts.length ? depensesFuts.map(m=>`
       <div class="ticket"><div class="t-head">
-        <div><div class="t-motif" style="font-size:14px">${esc(m.libelle||"Achat de fûts")}</div>
+        <div><div class="t-motif" style="font-size:14px">${esc(m.libelle||"Achat de boissons")}</div>
         <div class="t-meta">le ${fmtDM(m.cree_le)}</div></div>
         <div class="t-montant" style="color:var(--amende)">− ${m.montant} €</div>
       </div></div>`).join("")
-    : `<div class="empty">Aucun fût acheté pour l'instant… ça ne saurait tarder 🍻</div>`}`;
+    : `<div class="empty">Aucune boisson achetée pour l'instant… ça ne saurait tarder 🍻</div>`}`;
 }
 
 /* ---- comptabilité de la caisse (gestionnaires) ---- */
@@ -1142,7 +1144,7 @@ async function chargerCompta(){
   mouvements = data || [];
   document.getElementById("app").innerHTML = renderCompta();
 }
-const POTS = {futs:"🍺 Fûts", caisse:"💀 Caisse noire"};
+const POTS = {futs:"🍺 Bière & softs", caisse:"💀 Caisse noire"};
 function renderCompta(){
   const entreesParMoyen = {paypal:0, wero:0, cash:0};
   paiements.filter(p=>p.statut==="valide").forEach(p=>{
@@ -1209,7 +1211,7 @@ function renderCompta(){
       </div>
       <div style="display:flex;gap:6px;margin-top:10px">
         <div style="flex:1;background:#fdf3e3;border-radius:12px;padding:8px 6px;text-align:center">
-          <div style="font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--txt-dim)">🍺 Pot Fûts</div>
+          <div style="font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--txt-dim)">🍺 Pot Boissons</div>
           <div style="font-family:'Archivo Black';font-size:15px;color:var(--bleu-fonce)">${r2(potFutsIn - potFutsOut)} €</div>
           <div style="font-size:10.5px;color:var(--txt-dim)">+${potFutsIn} · −${potFutsOut}</div>
         </div>
@@ -1246,13 +1248,13 @@ function selCaisse(id, defaut){
 function openDepenseModal(){
   openSheet(`
     <h3>− Déclarer une dépense</h3>
-    <p class="sub">Une sortie d'argent de la caisse (fûts, matériel…)</p>
-    <div class="field"><label>Libellé</label><input id="depLbl" placeholder="Ex : 2 fûts de bière" maxlength="80"></div>
+    <p class="sub">Une sortie d'argent de la caisse (boissons, matériel…)</p>
+    <div class="field"><label>Libellé</label><input id="depLbl" placeholder="Ex : 2 fûts + packs de softs" maxlength="80"></div>
     <div class="field"><label>Montant (€)</label><input id="depMnt" type="number" inputmode="decimal" min="0.01" step="0.01" placeholder="Ex : 45.50"></div>
     <div class="field"><label>Payée depuis</label>${selCaisse("depSrc","revolut")}</div>
     <div class="field"><label>Sur le pot</label>
       <select id="depPot" style="width:100%;padding:10px;border:1.5px solid var(--line);border-radius:10px;font-family:'Archivo';font-weight:700;font-size:14px;background:#fff">
-        <option value="futs">🍺 Fûts de bière</option>
+        <option value="futs">🍺 Bière & softs</option>
         <option value="caisse">💀 Caisse noire (cohésion, matériel…)</option>
       </select></div>
     <button class="btn btn-no btn-full" onclick="validerDepense()">Enregistrer la dépense</button>`);
@@ -1341,7 +1343,7 @@ async function traiterInscription(id, nom, decision){
 }
 async function basculerDispense(id, nom, dispense){
   const msg = dispense
-    ? `Dispenser ${nom} de la cotisation mensuelle (blessure, absence longue) ?\n\nLa cotisation « Achat fûts de bière » ne lui sera plus appliquée tant qu'il est dispensé, et sa cotisation du mois en cours pourra être annulée.`
+    ? `Dispenser ${nom} de la cotisation mensuelle (blessure, absence longue) ?\n\nLa cotisation « Achat bière + softs » ne lui sera plus appliquée tant qu'il est dispensé, et sa cotisation du mois en cours pourra être annulée.`
     : `Réintégrer ${nom} ?\n\nLa cotisation mensuelle reprendra au 1er du mois prochain.`;
   if(!confirm(msg)) return;
   const {error} = await db.rpc("basculer_dispense", {p_token:AUTH.token, p_cible:id, p_dispense:dispense});
