@@ -433,7 +433,7 @@ function render(){
   mn.innerHTML = `
     <div class="drawer-bg" id="drawerBg" onclick="closeMenu()"></div>
     <div class="drawer" id="drawer">
-      <div class="d-brand"><b>HBC PILAT SG</b><span>La Caisse Noire · Saison 2026-27 · v2.10.4</span></div>
+      <div class="d-brand"><b>HBC PILAT SG</b><span>La Caisse Noire · Saison 2026-27 · v2.10.5</span></div>
       ${VIEWS.map(v=>`<button class="menu-item ${v.id===view?'on':''}" onclick="setView('${v.id}')">
         <span>${v.label}</span>${v.badge?`<span class="badge">${v.badge}</span>`:""}</button>`).join("")}
       <div style="border-top:1.5px solid var(--line);margin-top:10px;padding-top:8px">
@@ -1307,7 +1307,8 @@ function renderJoueurs(){
         ${j.dispense_cotisation?`<span style="margin-left:6px;font-size:10px;font-weight:800;letter-spacing:.04em;color:#fff;background:var(--attente);border-radius:6px;padding:2px 6px">🩹 DISPENSÉ</span>`:""}</div>
       ${canManage(j) ? (dim
         ? `<button class="mini" style="border:0;background:none;cursor:pointer;font-family:'Archivo';font-weight:700;font-size:12px;color:var(--billet)" onclick="gererJoueur('${j.id}','reactiver','${esc(j.nom)}')">Réactiver ↩</button>${isSuper()?`<button class="mini" style="border:0;background:none;cursor:pointer;font-family:'Archivo';font-weight:700;font-size:12px;color:var(--amende)" onclick="supprimerJoueur('${j.id}','${esc(j.nom)}')">Supprimer 🗑</button>`:""}`
-        : `<button class="mini" style="border:0;background:none;cursor:pointer;font-family:'Archivo';font-weight:700;font-size:12px;color:var(--bleu)" onclick="resetPin('${j.id}','${esc(j.nom)}')">PIN ↺</button>
+        : `<button class="mini" style="border:0;background:none;cursor:pointer;font-family:'Archivo';font-weight:700;font-size:12px;color:var(--bleu-fonce)" onclick="renommerJoueur('${j.id}','${esc(j.nom)}')">Renommer ✏️</button>
+           <button class="mini" style="border:0;background:none;cursor:pointer;font-family:'Archivo';font-weight:700;font-size:12px;color:var(--bleu)" onclick="resetPin('${j.id}','${esc(j.nom)}')">PIN ↺</button>
            <button class="mini" style="border:0;background:none;cursor:pointer;font-family:'Archivo';font-weight:700;font-size:12px;color:${j.dispense_cotisation?"var(--billet)":"var(--attente)"}" onclick="basculerDispense('${j.id}','${esc(j.nom)}',${j.dispense_cotisation?"false":"true"})">${j.dispense_cotisation?"Réintégrer 💪":"Dispenser 🩹"}</button>
            <button class="mini" style="border:0;background:none;cursor:pointer;font-family:'Archivo';font-weight:700;font-size:12px;color:var(--amende)" onclick="retirerJoueur('${j.id}','${esc(j.nom)}')">Retirer ✕</button>`)
         : ""}
@@ -1330,6 +1331,7 @@ function renderJoueurs(){
     <div class="empty" style="margin-top:14px">
       Clique sur un nom pour ouvrir sa fiche complète
       (solde, amendes, paiements, tables de marque, casse-croûtes, apéros).<br>
+      « Renommer ✏️ » corrige le nom (ex : distinguer deux prénoms identiques).
       « PIN ↺ » réinitialise le code d'un joueur qui l'a oublié.
       Un joueur retiré garde son historique et peut être réactivé.${isSuper()?"<br>« Supprimer 🗑 » (super gestionnaire) efface définitivement un joueur retiré, sauf s'il a des contributions validées.":""}
     </div>`;
@@ -1373,6 +1375,23 @@ async function supprimerJoueur(id, nom){
   if(rpcError(error)) return;
   await loadAll(); render();
   toast(`${nom} supprimé définitivement`);
+}
+async function renommerJoueur(id, nomActuel){
+  const saisie = prompt(`Nouveau nom pour « ${nomActuel} » :\n(ajoute une initiale pour distinguer deux joueurs, ex : Nicolas D.)`, nomActuel);
+  if(saisie===null) return;                 // annulé
+  const nom = saisie.trim();
+  if(nom.length<2){ toast("Nom trop court (2 caractères min)"); return; }
+  if(nom.length>30){ toast("Nom trop long (30 caractères max)"); return; }
+  if(nom===nomActuel) return;               // rien changé
+  const {error} = await db.rpc("renommer_joueur", {p_token:AUTH.token, p_cible:id, p_nouveau_nom:nom});
+  if(error){
+    toast((error.code==="23505" || (error.message||"").includes("duplicate"))
+      ? "Ce prénom existe déjà — ajoute une initiale (ex : Nicolas D.)"
+      : "Erreur : "+error.message);
+    return;
+  }
+  await loadAll(); render();
+  toast(`Renommé en « ${nom} » ✏️`);
 }
 
 function ficheJoueur(id){
