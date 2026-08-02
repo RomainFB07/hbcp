@@ -433,7 +433,7 @@ function render(){
   mn.innerHTML = `
     <div class="drawer-bg" id="drawerBg" onclick="closeMenu()"></div>
     <div class="drawer" id="drawer">
-      <div class="d-brand"><b>HBC PILAT SG</b><span>La Caisse Noire · Saison 2026-27 · v2.10.5</span></div>
+      <div class="d-brand"><b>HBC PILAT SG</b><span>La Caisse Noire · Saison 2026-27 · v2.11.0</span></div>
       ${VIEWS.map(v=>`<button class="menu-item ${v.id===view?'on':''}" onclick="setView('${v.id}')">
         <span>${v.label}</span>${v.badge?`<span class="badge">${v.badge}</span>`:""}</button>`).join("")}
       <div style="border-top:1.5px solid var(--line);margin-top:10px;padding-top:8px">
@@ -792,12 +792,14 @@ function choosePayment(moyen){
   document.getElementById("optWero").style.borderColor    = moyen==="wero"   ? "var(--bleu)" : "var(--line)";
   document.getElementById("optCash").style.borderColor    = moyen==="cash"   ? "var(--bleu)" : "var(--line)";
   if(moyen==="paypal"){
-    window.open(`https://paypal.me/${PAY_CONFIG.paypalUser}/${s}EUR`, "_blank");
     document.getElementById("payInstr").innerHTML =
-      `1️⃣ Envoie <b>${s} €</b> dans PayPal (fenêtre ouverte)<br>
-       2️⃣ Reviens ici et confirme 👇`;
+      `1️⃣ <button onclick="ouvrirPaypal(${s})" style="border:0;background:var(--bleu);color:#fff;border-radius:10px;padding:8px 14px;font-family:'Archivo';font-weight:800;font-size:13px;cursor:pointer">💳 Ouvrir PayPal — ${s} € ↗</button><br>
+       2️⃣ Envoie <b>${s} €</b> en choisissant « entre proches » (sans frais)<br>
+       3️⃣ <b>Reviens dans l'appli</b> et appuie sur le bouton vert ci-dessous 👇
+       <span style="color:var(--amende);font-size:12.5px">— sans ça, personne n'est prévenu et ton solde reste dû.</span>`;
     document.getElementById("btnConfirm").textContent = "✓ J'ai payé sur PayPal";
   } else if(moyen==="wero"){
+    memoIntention("wero", s);
     document.getElementById("payInstr").innerHTML =
       `1️⃣ Ouvre <b>ton appli bancaire</b> (ou l'appli Wero) → « Envoyer de l'argent via Wero »<br>
        2️⃣ Destinataire : <b>${PAY_CONFIG.weroEmail}</b>
@@ -814,11 +816,62 @@ function choosePayment(moyen){
   }
   document.getElementById("payConfirm").style.display = "block";
 }
+/* ---- mémo d'intention de paiement --------------------------------
+   Quand le joueur quitte l'appli pour PayPal / son appli bancaire, la PWA
+   peut être tuée par le téléphone : au retour, la fenêtre de confirmation
+   a disparu et le paiement n'est jamais déclaré. On mémorise donc son
+   intention pour la lui represénter au retour.                        */
+const PAY_INTENT_KEY = "cn_pay_intent";
+function memoIntention(moyen, montant){
+  if(!AUTH) return;
+  try{ localStorage.setItem(PAY_INTENT_KEY,
+    JSON.stringify({joueur:AUTH.id, moyen, montant, ts:Date.now()})); }catch(e){}
+}
+function oublierIntention(){ try{ localStorage.removeItem(PAY_INTENT_KEY); }catch(e){} }
+function lireIntention(){
+  try{ return JSON.parse(localStorage.getItem(PAY_INTENT_KEY) || "null"); }catch(e){ return null; }
+}
+function ouvrirPaypal(montant){
+  memoIntention("paypal", montant);
+  window.open(`https://paypal.me/${PAY_CONFIG.paypalUser}/${montant}EUR`, "_blank");
+}
+function verifierIntentionPaiement(){
+  if(!AUTH) return;
+  const it = lireIntention();
+  if(!it) return;
+  /* intention d'un autre compte, périmée (7 j), ou déjà suivie d'une déclaration */
+  if(it.joueur !== AUTH.id
+     || Date.now() - it.ts > 7*86400000
+     || paiements.some(p=>p.joueur_id===AUTH.id && p.statut==="pending")){
+    oublierIntention(); return;
+  }
+  const s = solde(AUTH.id);
+  if(s <= 0){ oublierIntention(); return; }   /* déjà régularisé entre-temps */
+  chosenMoyen = it.moyen;
+  openSheet(`
+    <h3>Tu as bien payé ? 🤔</h3>
+    <p class="sub">Tu as lancé un paiement de <b>${it.montant} €</b> via
+      <b>${MOYENS[it.moyen]||it.moyen}</b> mais tu n'as jamais confirmé dans l'appli.<br>
+      Si l'argent est bien parti, confirme ici : sinon les gestionnaires ne voient
+      rien et ton solde reste dû.</p>
+    <button class="btn btn-ok btn-full" onclick="confirmPaid()">✓ Oui, j'ai payé ${s} €</button>
+    <button class="btn btn-full" style="background:var(--paper-dim);color:var(--txt);margin-top:8px"
+      onclick="oublierIntention();closeModal()">Pas encore — plus tard</button>`);
+}
+document.addEventListener("visibilitychange", async ()=>{
+  if(document.visibilityState !== "visible" || !AUTH) return;
+  if(document.getElementById("overlay")?.classList.contains("open")) return;
+  if(!lireIntention()) return;
+  await loadAll(); render();
+  verifierIntentionPaiement();
+});
+
 async function confirmPaid(){
-  if(!chosenMoyen){ toast("Choisis d'abord PayPal ou espèces"); return; }
+  if(!chosenMoyen){ toast("Choisis d'abord un moyen de paiement"); return; }
   const {error} = await db.rpc("declarer_paiement_mensuel", {p_token:AUTH.token, p_moyen:chosenMoyen});
   closeModal();
   if(rpcError(error)) return;
+  oublierIntention();
   await loadAll(); render();
   toast("Paiement déclaré ✓ — en attente de validation");
 }
@@ -1394,6 +1447,38 @@ async function renommerJoueur(id, nomActuel){
   toast(`Renommé en « ${nom} » ✏️`);
 }
 
+/* ---- saisie directe d'un encaissement par un gestionnaire ---- */
+function openSaisiePaiement(id){
+  const j = joueursAll.find(x=>x.id===id); if(!j) return;
+  const s = solde(id);
+  openSheet(`
+    <h3>Saisir un paiement</h3>
+    <p class="sub">Pour <b>${esc(j.nom)}</b> — solde actuel : <b>${s} €</b>.<br>
+      Le paiement est enregistré comme <b>déjà encaissé</b> : rien à valider ensuite.</p>
+    <div class="field"><label>Montant reçu (€)</label>
+      <input id="fMontantP" type="number" inputmode="decimal" step="0.5" min="0.5"
+             value="${s>0?s:""}" placeholder="Ex : 3"></div>
+    <div class="field"><label>Moyen de paiement</label>
+      <select id="fMoyenP">
+        <option value="cash">Espèces</option>
+        <option value="paypal">PayPal</option>
+        <option value="wero">Wero</option>
+      </select></div>
+    <button class="btn btn-ok btn-full" onclick="saisirPaiement('${id}')">💶 Enregistrer l'encaissement</button>
+    <p class="sub" style="margin-top:10px">🔒 Un gestionnaire ne peut pas saisir son propre paiement.</p>`);
+}
+async function saisirPaiement(id){
+  const montant = parseFloat(String(document.getElementById("fMontantP").value||"").replace(",","."));
+  const moyen = document.getElementById("fMoyenP").value;
+  if(!(montant > 0)){ toast("Montant invalide"); return; }
+  const {error} = await db.rpc("saisir_paiement",
+    {p_token:AUTH.token, p_joueur:id, p_montant:montant, p_moyen:moyen});
+  closeModal();
+  if(rpcError(error)) return;
+  await loadAll(); render();
+  toast(`Paiement de ${montant} € enregistré ✓`);
+}
+
 function ficheJoueur(id){
   if(!isGest() && id !== AUTH.id) return;
   const j = joueursAll.find(x=>x.id===id); if(!j) return;
@@ -1448,6 +1533,9 @@ function ficheJoueur(id){
       ${chip(nbCC,"casse-croûtes")}
       ${chip(nbApero,"apéros gérés")}
     </div>
+    ${isGest() && id!==AUTH.id ? `
+      <button class="btn btn-ok btn-full" style="margin-bottom:12px"
+        onclick="openSaisiePaiement('${id}')">💶 Saisir un paiement reçu</button>` : ""}
     <div class="section-label" style="margin:4px 0 2px">Amendes (${mesA.length}) · total ${totAmendes} €</div>
     ${mesA.length ? mesA.map(lA).join("") : '<div class="empty">Aucune amende</div>'}
     <div class="section-label" style="margin:14px 0 2px">Crédits d'engagement (${mesT.length}) · total −${totCredits} €</div>
@@ -1810,7 +1898,7 @@ function toast(msg){
   // tâche automatique idempotente : cotisation du 1er du mois pour tous
   try { await db.rpc("appliquer_cotisation_mensuelle"); } catch(e){}
   initPush();
-  if(await loadAll()) render();
+  if(await loadAll()){ render(); verifierIntentionPaiement(); }
 })();
 
 </script>
