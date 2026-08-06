@@ -278,7 +278,7 @@ const db = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 /* ---------- état ---------- */
 let equipes = [], joueurs = [], joueursAll = [], bareme = [], amendes = [], matchs = [];
-let allInscriptions = [], aperosAll = [], paiements = [], tablesMarque = [];
+let allInscriptions = [], aperosAll = [], paiements = [], tablesMarque = [], dons = [];
 let AUTH = null;
 try { AUTH = JSON.parse(localStorage.getItem("cn_auth") || "null"); } catch(e){}
 let view = "amendes";
@@ -342,6 +342,14 @@ function partFuts(id){
   const {cotis, pa} = _parts(id);
   return Math.round(Math.min(pa, cotis) * 100) / 100;
 }
+/* DONS LIBRES — argent offert en plus à la cagnotte 🍺.
+   Un don n'entre JAMAIS dans le calcul du solde : il ne réduit rien,
+   il alimente à 100 % le pot Bière & softs. */
+const donsValides = () => dons.filter(d=>d.statut==="valide");
+function totalDons(){
+  return Math.round(donsValides().reduce((s,d)=>s+Number(d.montant),0)*100)/100;
+}
+const nomDon = d => d.joueurs?.nom || nomDe(d.joueur_id) || "?";
 
 const nomDe = id => (joueursAll.find(j=>j.id===id)||{}).nom || "";
 function rpcError(error){
@@ -358,7 +366,7 @@ function rpcError(error){
    CHARGEMENT
 ===================================================================== */
 async function loadAll(){
-  const [eq, jo, ba, am, ma, ins, ap, pa, tm] = await Promise.all([
+  const [eq, jo, ba, am, ma, ins, ap, pa, tm, dn] = await Promise.all([
     db.from("equipes").select().order("nom"),
     db.from("joueurs").select("id,nom,role,actif,en_attente,dispense_cotisation").order("nom"),
     db.from("bareme").select().eq("actif",true).order("ordre"),
@@ -370,6 +378,7 @@ async function loadAll(){
     db.from("aperos").select("*, apero_inscriptions(*, joueurs(nom))").order("date_apero"),
     db.from("paiements").select("*, joueurs!paiements_joueur_id_fkey(nom)").order("declare_le",{ascending:false}),
     db.from("tables_marque").select("*, joueurs!tables_marque_joueur_id_fkey(nom)").order("declare_le",{ascending:false}),
+    db.from("dons").select("*, joueurs!dons_joueur_id_fkey(nom)").order("declare_le",{ascending:false}),
   ]);
   const err = eq.error||jo.error||ba.error||am.error||ma.error||ins.error||ap.error||pa.error||tm.error;
   if(err){
@@ -381,6 +390,8 @@ async function loadAll(){
   bareme=ba.data; amendes=am.data; matchs=ma.data;
   allInscriptions=ins.data; aperosAll=ap.data;
   paiements=pa.data; tablesMarque=tm.data;
+  /* tolérant : si la table « dons » n'existe pas encore, l'app fonctionne quand même */
+  dons = (dn && !dn.error && dn.data) ? dn.data : [];
 
   if(AUTH && !joueurs.find(j=>j.id===AUTH.id)) logout(false);
   return true;
@@ -433,7 +444,7 @@ function render(){
   mn.innerHTML = `
     <div class="drawer-bg" id="drawerBg" onclick="closeMenu()"></div>
     <div class="drawer" id="drawer">
-      <div class="d-brand"><b>HBC PILAT SG</b><span>La Caisse Noire · Saison 2026-27 · v2.11.0</span></div>
+      <div class="d-brand"><b>HBC PILAT SG</b><span>La Caisse Noire · Saison 2026-27 · v2.12.0</span></div>
       ${VIEWS.map(v=>`<button class="menu-item ${v.id===view?'on':''}" onclick="setView('${v.id}')">
         <span>${v.label}</span>${v.badge?`<span class="badge">${v.badge}</span>`:""}</button>`).join("")}
       <div style="border-top:1.5px solid var(--line);margin-top:10px;padding-top:8px">
@@ -583,9 +594,10 @@ function renderCompte(){
   if(isGest()){
     const pPend = paiements.filter(p=>p.statut==="pending");
     const tPend = tablesMarque.filter(t=>t.statut==="pending");
-    out += `<div class="section-label">⏳ À valider (${pPend.length + tPend.length})
+    const dPend = dons.filter(d=>d.statut==="pending");
+    out += `<div class="section-label">⏳ À valider (${pPend.length + tPend.length + dPend.length})
       <button class="add-mini" onclick="openAmendeForm()">+ Donner une amende</button></div>`;
-    if(!pPend.length && !tPend.length) out += `<div class="empty">Rien à valider</div>`;
+    if(!pPend.length && !tPend.length && !dPend.length) out += `<div class="empty">Rien à valider</div>`;
     out += pPend.map(p=>`
       <div class="ticket"><div class="t-head">
         <div><div class="t-motif">${esc(p.joueurs?.nom||"?")} — paiement du solde</div>
@@ -607,6 +619,17 @@ function renderCompte(){
           : `<div class="t-actions">
           <button class="btn btn-ok" onclick="validerTable('${t.id}')">✓ Confirmer</button>
           <button class="btn btn-no" onclick="refuserTable('${t.id}')">Refuser</button>
+        </div>`}</div>`).join("");
+    out += dPend.map(d=>`
+      <div class="ticket"><div class="t-head">
+        <div><div class="t-motif">💝 ${esc(nomDon(d))} — don à la cagnotte 🍺</div>
+        <div class="t-meta">déclaré le ${fmtDMH(d.declare_le)} · via ${MOYENS[d.moyen]||"?"} · n'entre pas dans son solde</div></div>
+        <div class="t-montant pend">${d.montant} €</div></div>
+        ${d.joueur_id===AUTH.id
+          ? `<div style="margin-top:10px;font-size:12.5px;color:var(--txt-dim);font-style:italic">🔒 Un autre gestionnaire doit valider ton propre don</div>`
+          : `<div class="t-actions">
+          <button class="btn btn-ok" onclick="validerDon('${d.id}')">✓ Argent reçu</button>
+          <button class="btn btn-no" onclick="refuserDon('${d.id}')">Pas reçu</button>
         </div>`}</div>`).join("");
 
     /* retards : à partir du 11 du mois */
@@ -648,6 +671,7 @@ function renderCompte(){
     : `📆 Le solde de <b>${moisCour}</b> sera à régler <b>avant le 10 ${moisSuiv}</b>. Retard = majoration de 2 €.`;
   const s = solde(AUTH.id);
   const pend = paiements.find(p=>p.joueur_id===AUTH.id && p.statut==="pending");
+  const pendDon = dons.find(d=>d.joueur_id===AUTH.id && d.statut==="pending");
   out += `
     <div class="section-label" style="display:flex;justify-content:space-between;align-items:baseline">Mon compte
       <span style="font-size:12px;letter-spacing:0;text-transform:none;font-weight:700;color:var(--bleu);cursor:pointer" onclick="ficheJoueur('${AUTH.id}')">📋 Ma fiche complète ›</span>
@@ -658,6 +682,7 @@ function renderCompte(){
       ${s<0?`<div style="font-size:12.5px;color:var(--billet);font-weight:600;margin-top:2px">Trop-perçu : tes prochains montants dus seront déduits de cet avoir 😎</div>`:""}
       ${reserveCredits(AUTH.id)>0?`<div style="font-size:12.5px;color:var(--billet);font-weight:600;margin-top:4px">🎁 Crédits en réserve : ${reserveCredits(AUTH.id)} € — déduits de tes prochaines amendes (jamais de la cotisation bière & softs 🍺)</div>`:""}
       ${pend ? `<div style="font-size:13px;color:var(--attente);font-weight:700;margin-top:4px">⏳ Paiement de ${pend.montant} € en attente de validation</div>` : ""}
+      ${pendDon ? `<div style="font-size:13px;color:var(--attente);font-weight:700;margin-top:4px">⏳ Don de ${pendDon.montant} € en attente de validation 💝</div>` : ""}
       <div style="display:flex;gap:8px;margin-top:14px;align-items:stretch">
         <button class="btn btn-pay" style="flex:1;height:auto" ${s>0 && !pend ? `onclick="openPayModal()"` : "disabled style='flex:1;height:auto;opacity:.45;cursor:default'"}>💳 Payer<br>mon solde</button>
         <div style="flex:1.6;display:flex;flex-direction:column;gap:6px">
@@ -674,7 +699,8 @@ function renderCompte(){
     <div class="empty" style="margin-bottom:12px">
       ${deadlineTxt}<br>
       🍺 Chaque 1er du mois (sauf juillet) : cotisation de ${cotisMontant} € obligatoire pour « Achat bière + softs », ajoutée automatiquement au solde de chacun.
-    </div>`;
+    </div>
+    <button class="btn btn-ok btn-full" style="margin-bottom:12px" onclick="openDonModal()">💝 Faire un don à la cagnotte 🍺</button>`;
 
   /* ---- mes engagements récompensés ---- */
   const mesCredits = tablesMarque.filter(t=>t.joueur_id===AUTH.id);
@@ -861,9 +887,10 @@ function verifierIntentionPaiement(){
 document.addEventListener("visibilitychange", async ()=>{
   if(document.visibilityState !== "visible" || !AUTH) return;
   if(document.getElementById("overlay")?.classList.contains("open")) return;
-  if(!lireIntention()) return;
+  if(!lireIntention() && !lireIntentionDon()) return;
   await loadAll(); render();
   verifierIntentionPaiement();
+  if(!document.getElementById("overlay")?.classList.contains("open")) verifierIntentionDon();
 });
 
 async function confirmPaid(){
@@ -886,6 +913,169 @@ async function refuserPaiement(id){
   if(rpcError(error)) return;
   await loadAll(); render();
   toast("Paiement refusé — le solde reste dû");
+}
+
+/* ---- don libre à la cagnotte 🍺 ------------------------------------
+   Un don est volontaire, d'un montant libre, et NE TOUCHE PAS au solde
+   du donateur : il va à 100 % dans le pot Bière & softs.
+   Table « dons » séparée de « paiements » — voir migration v2.12.0.   */
+let donMontant = 0, donMoyen = null;
+function lireMontantDon(){
+  const el = document.getElementById("fDon");
+  if(!el) return 0;
+  const v = parseFloat(String(el.value||"").replace(",", "."));
+  return isNaN(v) ? 0 : Math.round(v*100)/100;
+}
+function resetDonChoix(){
+  donMoyen = null;
+  ["optDonPaypal","optDonWero","optDonCash"].forEach(i=>{
+    const e = document.getElementById(i); if(e) e.style.borderColor = "var(--line)";
+  });
+  const c = document.getElementById("donConfirm"); if(c) c.style.display = "none";
+}
+function openDonModal(){
+  donMontant = 0; donMoyen = null;
+  openSheet(`
+    <h3>💝 Faire un don à la cagnotte 🍺</h3>
+    <p class="sub">Un don, c'est de l'argent <b>en plus</b> pour les fûts et les softs de l'équipe.
+      Il ne réduit <b>jamais</b> ton solde d'amendes ni ta cotisation — c'est cadeau,
+      et ton nom apparaît dans la liste des donateurs 🙏</p>
+    <div class="field"><label>Montant du don (€)</label>
+      <input id="fDon" type="number" inputmode="decimal" step="0.5" min="0.5"
+             placeholder="Ex : 10" oninput="resetDonChoix()"></div>
+    <p class="sub" style="margin:-4px 0 10px">Choisis ensuite comment tu l'envoies :</p>
+    <button class="pay-opt" id="optDonPaypal" onclick="chooseDon('paypal')">
+      <div class="ico" style="background:#003087">PP</div>
+      <div class="lbl"><b>PayPal</b><span>paypal.me · « entre proches » = sans frais</span></div>
+    </button>
+    <button class="pay-opt" id="optDonWero" onclick="chooseDon('wero')">
+      <div class="ico" style="background:#e5006d">W</div>
+      <div class="lbl"><b>Wero</b><span>virement instantané gratuit depuis ton appli bancaire</span></div>
+    </button>
+    <button class="pay-opt" id="optDonCash" onclick="chooseDon('cash')">
+      <div class="ico" style="background:var(--billet)">€</div>
+      <div class="lbl"><b>Espèces</b><span>À remettre en main propre à un gestionnaire</span></div>
+    </button>
+    <div id="donConfirm" style="display:none">
+      <div id="donInstr" style="background:#fff;border:1.5px dashed var(--line);border-radius:12px;padding:14px;font-size:14px;line-height:1.5;margin-bottom:12px"></div>
+      <button class="btn btn-ok btn-full" id="btnDonConfirm" onclick="confirmDon()"></button>
+    </div>`);
+}
+function chooseDon(moyen){
+  const m = lireMontantDon();
+  if(!(m > 0)){ toast("Saisis d'abord un montant 💶"); return; }
+  donMontant = m; donMoyen = moyen;
+  document.getElementById("optDonPaypal").style.borderColor = moyen==="paypal" ? "var(--bleu)" : "var(--line)";
+  document.getElementById("optDonWero").style.borderColor   = moyen==="wero"   ? "var(--bleu)" : "var(--line)";
+  document.getElementById("optDonCash").style.borderColor   = moyen==="cash"   ? "var(--bleu)" : "var(--line)";
+  if(moyen==="paypal"){
+    document.getElementById("donInstr").innerHTML =
+      `1️⃣ <button onclick="ouvrirPaypalDon(${m})" style="border:0;background:var(--bleu);color:#fff;border-radius:10px;padding:8px 14px;font-family:'Archivo';font-weight:800;font-size:13px;cursor:pointer">💳 Ouvrir PayPal — ${m} € ↗</button><br>
+       2️⃣ Envoie <b>${m} €</b> en choisissant « entre proches » (sans frais)<br>
+       3️⃣ <b>Reviens dans l'appli</b> et appuie sur le bouton vert ci-dessous 👇
+       <span style="color:var(--amende);font-size:12.5px">— sans ça, ton don n'est enregistré nulle part.</span>`;
+    document.getElementById("btnDonConfirm").textContent = `✓ J'ai donné ${m} € sur PayPal`;
+  } else if(moyen==="wero"){
+    memoIntentionDon("wero", m);
+    document.getElementById("donInstr").innerHTML =
+      `1️⃣ Ouvre <b>ton appli bancaire</b> (ou l'appli Wero) → « Envoyer de l'argent via Wero »<br>
+       2️⃣ Destinataire : <b>${PAY_CONFIG.weroEmail}</b>
+       <button onclick="navigator.clipboard.writeText(PAY_CONFIG.weroEmail).then(()=>toast('E-mail copié ✓'))" style="border:1px solid var(--line);background:#fff;border-radius:8px;padding:2px 8px;font-family:'Archivo';font-weight:700;font-size:11.5px;cursor:pointer;color:var(--bleu)">📋 copier</button><br>
+       3️⃣ Montant : <b>exactement ${m} €</b><br>
+       4️⃣ Reviens ici et confirme 👇`;
+    document.getElementById("btnDonConfirm").textContent = `✓ J'ai donné ${m} € via Wero`;
+  } else {
+    document.getElementById("donInstr").innerHTML =
+      `Remets <b>${m} €</b> en espèces à <b>Romain, Fabio ou Kévin</b>.<br>
+       <span style="color:var(--txt-dim);font-size:12.5px">Ton don apparaîtra dans la cagnotte une fois qu'un gestionnaire aura confirmé avoir reçu l'argent.</span>`;
+    document.getElementById("btnDonConfirm").textContent = `✓ Je donne ${m} € en espèces`;
+  }
+  document.getElementById("donConfirm").style.display = "block";
+}
+/* mémo d'intention, même principe que pour le paiement du solde */
+const DON_INTENT_KEY = "cn_don_intent";
+function memoIntentionDon(moyen, montant){
+  if(!AUTH) return;
+  try{ localStorage.setItem(DON_INTENT_KEY,
+    JSON.stringify({joueur:AUTH.id, moyen, montant, ts:Date.now()})); }catch(e){}
+}
+function oublierIntentionDon(){ try{ localStorage.removeItem(DON_INTENT_KEY); }catch(e){} }
+function lireIntentionDon(){
+  try{ return JSON.parse(localStorage.getItem(DON_INTENT_KEY) || "null"); }catch(e){ return null; }
+}
+function ouvrirPaypalDon(montant){
+  memoIntentionDon("paypal", montant);
+  window.open(`https://paypal.me/${PAY_CONFIG.paypalUser}/${montant}EUR`, "_blank");
+}
+function verifierIntentionDon(){
+  if(!AUTH) return;
+  const it = lireIntentionDon();
+  if(!it) return;
+  if(it.joueur !== AUTH.id
+     || Date.now() - it.ts > 7*86400000
+     || dons.some(d=>d.joueur_id===AUTH.id && d.statut==="pending")){
+    oublierIntentionDon(); return;
+  }
+  donMontant = it.montant; donMoyen = it.moyen;
+  openSheet(`
+    <h3>Ton don est parti ? 🤔</h3>
+    <p class="sub">Tu as lancé un don de <b>${it.montant} €</b> à la cagnotte 🍺 via
+      <b>${MOYENS[it.moyen]||it.moyen}</b> mais tu n'as jamais confirmé dans l'appli.<br>
+      Si l'argent est bien parti, confirme ici pour qu'il apparaisse dans la cagnotte.</p>
+    <button class="btn btn-ok btn-full" onclick="confirmDon()">✓ Oui, j'ai donné ${it.montant} €</button>
+    <button class="btn btn-full" style="background:var(--paper-dim);color:var(--txt);margin-top:8px"
+      onclick="oublierIntentionDon();closeModal()">Finalement non</button>`);
+}
+async function confirmDon(){
+  if(!donMoyen || !(donMontant > 0)){ toast("Choisis un montant et un moyen de paiement"); return; }
+  const {error} = await db.rpc("declarer_don",
+    {p_token:AUTH.token, p_montant:donMontant, p_moyen:donMoyen});
+  closeModal();
+  if(rpcError(error)) return;
+  oublierIntentionDon();
+  await loadAll(); render();
+  toast("Don déclaré ✓ — merci ! 🍻");
+}
+async function validerDon(id){
+  const {error} = await db.rpc("valider_don", {p_token:AUTH.token, p_id:id});
+  if(rpcError(error)) return;
+  await loadAll(); render();
+  toast("Don encaissé ✓ 💝");
+}
+async function refuserDon(id){
+  const {error} = await db.rpc("refuser_don", {p_token:AUTH.token, p_id:id});
+  if(rpcError(error)) return;
+  await loadAll(); render();
+  toast("Don refusé — argent non reçu");
+}
+/* saisie directe d'un don reçu par un gestionnaire */
+function openSaisieDon(id){
+  const j = joueursAll.find(x=>x.id===id); if(!j) return;
+  openSheet(`
+    <h3>💝 Saisir un don reçu</h3>
+    <p class="sub">De la part de <b>${esc(j.nom)}</b>, pour la cagnotte 🍺.<br>
+      Enregistré comme <b>déjà encaissé</b> — son solde n'est pas modifié.</p>
+    <div class="field"><label>Montant du don (€)</label>
+      <input id="fMontantD" type="number" inputmode="decimal" step="0.5" min="0.5" placeholder="Ex : 10"></div>
+    <div class="field"><label>Moyen de paiement</label>
+      <select id="fMoyenD">
+        <option value="cash">Espèces</option>
+        <option value="paypal">PayPal</option>
+        <option value="wero">Wero</option>
+      </select></div>
+    <button class="btn btn-ok btn-full" onclick="saisirDon('${id}')">💝 Enregistrer le don</button>
+    <p class="sub" style="margin-top:10px">🔒 Un gestionnaire ne peut pas saisir son propre don.</p>`);
+}
+async function saisirDon(id){
+  const montant = parseFloat(String(document.getElementById("fMontantD").value||"").replace(",", "."));
+  const moyen = document.getElementById("fMoyenD").value;
+  if(!(montant > 0)){ toast("Montant invalide"); return; }
+  const {error} = await db.rpc("saisir_don",
+    {p_token:AUTH.token, p_joueur:id, p_montant:montant, p_moyen:moyen});
+  closeModal();
+  if(rpcError(error)) return;
+  await loadAll(); render();
+  toast(`Don de ${montant} € enregistré ✓`);
 }
 
 /* ---- tables de marque ---- */
@@ -1163,20 +1353,41 @@ async function chargerFuts(){
 }
 function renderFuts(){
   const collecte = Math.round(joueursAll.reduce((s,j)=>s+partFuts(j.id),0)*100)/100;
+  const dv = donsValides();
+  const totDons = totalDons();
   const depense = Math.round(depensesFuts.reduce((s,m)=>s+Number(m.montant),0)*100)/100;
-  const dispo = Math.round((collecte - depense)*100)/100;
+  const dispo = Math.round((collecte + totDons - depense)*100)/100;
+  /* cumul par donateur, du plus généreux au moins généreux */
+  const parDonateur = {};
+  dv.forEach(d=>{ const nm = nomDon(d); parDonateur[nm] = (parDonateur[nm]||0) + Number(d.montant); });
+  const donateurs = Object.entries(parDonateur)
+    .map(([nm,mt])=>({nom:nm, montant:Math.round(mt*100)/100}))
+    .sort((a,b)=>b.montant-a.montant);
+  const medaille = i => i===0?"🥇":i===1?"🥈":i===2?"🥉":"💝";
+  const monDonPend = AUTH ? dons.find(d=>d.joueur_id===AUTH.id && d.statut==="pending") : null;
   return `
     <div class="section-label">🍺 La cagnotte bière & softs</div>
     <div class="ticket" style="text-align:center;padding:22px 16px 18px;margin-bottom:8px">
       <div style="font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--txt-dim)">Dans la cagnotte</div>
       <div style="font-family:'Archivo Black';font-size:44px;line-height:1.1;color:${dispo<0?"var(--amende)":"var(--billet)"}">${dispo} €</div>
       <div style="font-size:12.5px;color:var(--txt-dim);margin-top:6px">
-        ${collecte} € de cotisations encaissées · ${depense} € de boissons achetées
+        ${collecte} € de cotisations encaissées${totDons?` · <b style="color:var(--billet)">${totDons} € de dons 💝</b>`:""} · ${depense} € de boissons achetées
       </div>
+      <button class="btn btn-ok btn-full" style="margin-top:14px" onclick="openDonModal()">💝 Faire un don libre</button>
+      ${monDonPend?`<div style="font-size:12.5px;color:var(--attente);font-weight:700;margin-top:8px">⏳ Ton don de ${monDonPend.montant} € attend la validation d'un gestionnaire</div>`:""}
     </div>
     <div class="empty" style="margin-bottom:10px">
-      🍺 Alimentée par la cotisation de 3 €/mois de chaque joueur (tous les mois sauf juillet). Elle finance les fûts ET les softs — chacun y trouve son compte. Les crédits d'engagement ne la réduisent jamais : l'apéro d'équipe, c'est sacré.
+      🍺 Alimentée par la cotisation de 3 €/mois de chaque joueur (tous les mois sauf juillet). Elle finance les fûts ET les softs — chacun y trouve son compte. Les crédits d'engagement ne la réduisent jamais : l'apéro d'équipe, c'est sacré.<br>
+      💝 Tu peux aussi <b>donner ce que tu veux, quand tu veux</b> : un don ne réduit pas ton solde, il gonfle la cagnotte de toute l'équipe.
     </div>
+    <div class="section-label">Les donateurs (${donateurs.length})</div>
+    ${donateurs.length ? donateurs.map((d,i)=>`
+      <div class="ticket"><div class="t-head">
+        <div><div class="t-motif" style="font-size:14px">${medaille(i)} ${esc(d.nom)}</div>
+        <div class="t-meta">merci ! 🙏</div></div>
+        <div class="t-montant" style="color:var(--billet)">+ ${d.montant} €</div>
+      </div></div>`).join("")
+    : `<div class="empty">Personne n'a encore donné… sois le premier 💝</div>`}
     <div class="section-label">Les boissons achetées (${depensesFuts.length})</div>
     ${depensesFuts.length ? depensesFuts.map(m=>`
       <div class="ticket"><div class="t-head">
@@ -1203,8 +1414,13 @@ function renderCompta(){
   paiements.filter(p=>p.statut==="valide").forEach(p=>{
     entreesParMoyen[p.moyen] = (entreesParMoyen[p.moyen]||0) + Number(p.montant);
   });
-  /* ventilation par pot (cotisation payée en priorité) */
-  const potFutsIn = Math.round(joueursAll.reduce((s,j)=>s+partFuts(j.id),0)*100)/100;
+  /* les dons libres entrent en caisse comme les paiements… */
+  const dvC = donsValides();
+  dvC.forEach(d=>{
+    entreesParMoyen[d.moyen] = (entreesParMoyen[d.moyen]||0) + Number(d.montant);
+  });
+  /* ventilation par pot : cotisation payée en priorité, + 100 % des dons au pot 🍺 */
+  const potFutsIn = Math.round((joueursAll.reduce((s,j)=>s+partFuts(j.id),0) + totalDons())*100)/100;
   const caisse = {paypal:0, revolut:0, especes:0};
   Object.entries(entreesParMoyen).forEach(([m,v])=>{ caisse[MOYEN_VERS_CAISSE[m]||"especes"] += v; });
   let sortiesTotal = 0; const sortiesParCaisse = {paypal:0, revolut:0, especes:0};
@@ -1238,6 +1454,12 @@ function renderCompta(){
     sous: `${MOYENS[p.moyen]||"?"} → caisse ${CAISSES[MOYEN_VERS_CAISSE[p.moyen]]||"?"}`,
     id: null
   }));
+  dvC.forEach(d=>lignes.push({
+    ts: d.valide_le || d.declare_le, sens: "+", montant: Number(d.montant),
+    txt: `💝 Don ${esc(nomDon(d))}`,
+    sous: `${MOYENS[d.moyen]||"?"} → caisse ${CAISSES[MOYEN_VERS_CAISSE[d.moyen]]||"?"} · pot 🍺 Bière & softs`,
+    id: null
+  }));
   mouvements.forEach(m=>lignes.push({
     ts: m.cree_le, sens: m.type==="depense" ? "−" : "⇄", montant: Number(m.montant),
     txt: m.type==="depense" ? `${m.pot==="futs"?"🍺 ":"💀 "}${esc(m.libelle||"Dépense")}` : `Transfert ${CAISSES[m.caisse_source]} → ${CAISSES[m.caisse_dest]}`,
@@ -1259,7 +1481,7 @@ function renderCompta(){
         ${chip(caisse.especes, "Espèces")}
       </div>
       <div style="font-size:12px;color:var(--txt-dim);text-align:center;margin-top:10px">
-        Entré : <b>${entreesTotal} €</b> (PayPal ${r2(entreesParMoyen.paypal)} · Wero ${r2(entreesParMoyen.wero)} · Espèces ${r2(entreesParMoyen.cash)})<br>
+        Entré : <b>${entreesTotal} €</b> (PayPal ${r2(entreesParMoyen.paypal)} · Wero ${r2(entreesParMoyen.wero)} · Espèces ${r2(entreesParMoyen.cash)})${totalDons()?` · dont <b>${totalDons()} €</b> de dons 💝`:""}<br>
         Sorti : <b>${r2(sortiesTotal)} €</b> (PayPal ${r2(sortiesParCaisse.paypal)} · Revolut ${r2(sortiesParCaisse.revolut)} · Espèces ${r2(sortiesParCaisse.especes)})
       </div>
       <div style="display:flex;gap:6px;margin-top:10px">
@@ -1488,6 +1710,9 @@ function ficheJoueur(id){
     .sort((x,y)=>(y.declare_le||"").localeCompare(x.declare_le||""));
   const mesP = paiements.filter(p=>p.joueur_id===id)
     .sort((x,y)=>(y.declare_le||"").localeCompare(x.declare_le||""));
+  const mesD = dons.filter(d=>d.joueur_id===id)
+    .sort((x,y)=>(y.declare_le||"").localeCompare(x.declare_le||""));
+  const totDonsJ = Math.round(mesD.filter(d=>d.statut==="valide").reduce((s,d)=>s+Number(d.montant),0)*100)/100;
   const totAmendes = mesA.reduce((s,a)=>s+Number(a.montant),0);
   const totCredits = mesT.filter(t=>t.statut==="valide").reduce((s,t)=>s+Number(t.montant),0);
   const totPayes = mesP.filter(p=>p.statut==="valide").reduce((s,p)=>s+Number(p.montant),0);
@@ -1513,6 +1738,10 @@ function ficheJoueur(id){
       <div style="display:flex;justify-content:space-between;gap:8px"><b>Paiement (${MOYENS[p.moyen]||"?"})</b>
         <span style="font-family:'Archivo Black';color:${p.statut==='valide'?'var(--billet)':'var(--attente)'};white-space:nowrap">${p.montant} € ${p.statut==='valide'?'✓':'⏳'}</span></div>
       <div style="color:var(--txt-dim);font-size:12px">déclaré le ${fmtDMH(p.declare_le)}${p.valide_le?` · <b>validé le ${fmtDMH(p.valide_le)}${p.valide_par?" par "+esc(nomDe(p.valide_par)):""}</b>`:" · en attente de validation"}</div></div>`;
+  const lD = d => `<div style="padding:8px 0;border-top:1px solid var(--paper-dim);font-size:13px">
+      <div style="display:flex;justify-content:space-between;gap:8px"><b>Don à la cagnotte 🍺 (${MOYENS[d.moyen]||"?"})</b>
+        <span style="font-family:'Archivo Black';color:${d.statut==='valide'?'var(--billet)':'var(--attente)'};white-space:nowrap">+${d.montant} € ${d.statut==='valide'?'✓':'⏳'}</span></div>
+      <div style="color:var(--txt-dim);font-size:12px">déclaré le ${fmtDMH(d.declare_le)}${d.valide_le?` · validé le ${fmtDMH(d.valide_le)}${d.valide_par?" par "+esc(nomDe(d.valide_par)):""}`:" · en attente de validation"} · sans effet sur le solde</div></div>`;
   openSheet(`
     <h3>${esc(j.nom)}${j.actif?"":" <span style='color:var(--txt-dim);font-size:13px'>(retiré)</span>"}
       ${ROLES[j.role]?` <span class="gest-badge">${j.role==='super'?'SUPER':'GESTIONNAIRE'}</span>`:""}</h3>
@@ -1533,15 +1762,19 @@ function ficheJoueur(id){
       ${chip(nbCC,"casse-croûtes")}
       ${chip(nbApero,"apéros gérés")}
     </div>
+    ${totDonsJ ? `<div style="text-align:center;font-size:12.5px;color:var(--billet);font-weight:700;margin-bottom:10px">💝 ${totDonsJ} € offerts à la cagnotte 🍺 (hors solde)</div>` : ""}
     ${isGest() && id!==AUTH.id ? `
+      <button class="btn btn-ok btn-full" style="margin-bottom:8px"
+        onclick="openSaisiePaiement('${id}')">💶 Saisir un paiement reçu</button>
       <button class="btn btn-ok btn-full" style="margin-bottom:12px"
-        onclick="openSaisiePaiement('${id}')">💶 Saisir un paiement reçu</button>` : ""}
+        onclick="openSaisieDon('${id}')">💝 Saisir un don reçu</button>` : ""}
     <div class="section-label" style="margin:4px 0 2px">Amendes (${mesA.length}) · total ${totAmendes} €</div>
     ${mesA.length ? mesA.map(lA).join("") : '<div class="empty">Aucune amende</div>'}
     <div class="section-label" style="margin:14px 0 2px">Crédits d'engagement (${mesT.length}) · total −${totCredits} €</div>
     ${mesT.length ? mesT.map(lT).join("") : '<div class="empty">Aucune table déclarée</div>'}
     <div class="section-label" style="margin:14px 0 2px">Paiements (${mesP.length})</div>
-    ${mesP.length ? mesP.map(lP).join("") : '<div class="empty">Aucun paiement</div>'}`);
+    ${mesP.length ? mesP.map(lP).join("") : '<div class="empty">Aucun paiement</div>'}
+    ${mesD.length ? `<div class="section-label" style="margin:14px 0 2px">Dons à la cagnotte 🍺 (${mesD.length}) · total ${totDonsJ} €</div>` + mesD.map(lD).join("") : ""}`);
 }
 
 /* =====================================================================
@@ -1898,7 +2131,11 @@ function toast(msg){
   // tâche automatique idempotente : cotisation du 1er du mois pour tous
   try { await db.rpc("appliquer_cotisation_mensuelle"); } catch(e){}
   initPush();
-  if(await loadAll()){ render(); verifierIntentionPaiement(); }
+  if(await loadAll()){
+    render();
+    verifierIntentionPaiement();
+    if(!document.getElementById("overlay")?.classList.contains("open")) verifierIntentionDon();
+  }
 })();
 
 </script>
