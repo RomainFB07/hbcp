@@ -116,6 +116,21 @@
   .team-filter{display:flex;gap:7px;margin:0 0 14px}
   .team-filter button{border:1.5px solid var(--line);background:var(--paper);color:var(--txt-dim);font-family:'Archivo';font-weight:700;font-size:12.5px;padding:7px 14px;border-radius:999px;cursor:pointer}
   .team-filter button.on{background:var(--noir);border-color:var(--noir);color:#fff}
+  /* ---- liens FFHB (classement / resultats officiels) ---- */
+  .ffhb-band{display:flex;flex-direction:column;gap:7px;margin:0 0 14px}
+  .ffhb-row{display:flex;align-items:center;gap:7px}
+  .ffhb-link{flex:1;display:flex;align-items:center;gap:9px;text-decoration:none;
+    background:var(--paper);border:1.5px solid var(--line);border-radius:12px;
+    padding:9px 12px;color:var(--txt);font-family:'Archivo';font-weight:700;font-size:13px;
+    box-shadow:0 1px 6px rgba(4,95,159,.06)}
+  .ffhb-link:active{background:var(--bleu-pale)}
+  .ffhb-link .lib{flex:1;line-height:1.25}
+  .ffhb-go{color:var(--bleu);font-family:'Archivo Black';font-size:14px}
+  .ffhb-vide{flex:1;font-size:12.5px;color:var(--txt-dim)}
+  .ffhb-edit{border:1.5px solid var(--line);background:var(--paper);color:var(--txt-dim);
+    font-family:'Archivo';font-weight:700;font-size:12px;padding:8px 11px;border-radius:10px;cursor:pointer}
+  .ffhb-edit:active{background:var(--bleu-pale)}
+
   .team-tag{font-family:'Archivo Black';font-size:10px;letter-spacing:.06em;padding:3px 8px;border-radius:6px;color:#fff;display:inline-block}
 
   .ticket{position:relative;background:var(--paper);color:var(--txt);border-radius:var(--radius);padding:16px 16px 14px;margin-bottom:12px;overflow:hidden;box-shadow:0 2px 10px rgba(4,95,159,.09)}
@@ -444,7 +459,7 @@ function render(){
   mn.innerHTML = `
     <div class="drawer-bg" id="drawerBg" onclick="closeMenu()"></div>
     <div class="drawer" id="drawer">
-      <div class="d-brand"><b>HBC PILAT SG</b><span>La Caisse Noire · Saison 2026-27 · v2.12.0</span></div>
+      <div class="d-brand"><b>HBC PILAT SG</b><span>La Caisse Noire · Saison 2026-27 · v2.13.0</span></div>
       ${VIEWS.map(v=>`<button class="menu-item ${v.id===view?'on':''}" onclick="setView('${v.id}')">
         <span>${v.label}</span>${v.badge?`<span class="badge">${v.badge}</span>`:""}</button>`).join("")}
       <div style="border-top:1.5px solid var(--line);margin-top:10px;padding-top:8px">
@@ -1789,7 +1804,46 @@ function renderMatchs(){
       <button class="${teamFilter==='tous'?'on':''}" onclick="setTeam('tous')">Toutes</button>
       ${equipes.map(e=>`<button class="${teamFilter===e.id?'on':''}" onclick="setTeam('${e.id}')">${esc(e.nom)}</button>`).join("")}
     </div>
+    ${ffhbBand()}
     ${filtered.length ? filtered.map(matchCard).join("") : `<div class="empty">Aucun match à venir${isGest()?" — ajoute le calendrier !":""}</div>`}`;
+}
+/* ---- liens FFHB : classement et resultats officiels par equipe ---------
+   Le lien est stocke dans equipes.lien_ffhb (migration v2.13.0) : un
+   gestionnaire peut donc le mettre a jour chaque saison sans toucher au code. */
+function ffhbBand(){
+  const cibles = equipes.filter(e => teamFilter==="tous" || e.id===teamFilter);
+  const lignes = cibles.map(e=>{
+    const lien = (e.lien_ffhb||"").trim();
+    const tag = `<span class="team-tag" style="background:${e.couleur||'#0480d8'}">${esc(e.nom)}</span>`;
+    if(!lien){
+      if(!isGest()) return "";
+      return `<div class="ffhb-row">
+        <span class="ffhb-vide">${tag} pas encore de lien FFHB</span>
+        <button class="ffhb-edit" onclick="editLienFFHB('${e.id}')">+ ajouter le lien</button></div>`;
+    }
+    const edit = isGest()
+      ? `<button class="ffhb-edit" onclick="editLienFFHB('${e.id}')" title="Modifier le lien FFHB">\u270F\uFE0F</button>`
+      : "";
+    return `<div class="ffhb-row">
+      <a class="ffhb-link" href="${esc(lien)}" target="_blank" rel="noopener">
+        ${tag}<span class="lib">Classement &amp; r\u00E9sultats officiels</span><span class="ffhb-go">\u2197</span></a>${edit}</div>`;
+  }).join("");
+  if(!lignes) return "";
+  return `<div class="ffhb-band">${lignes}</div>`;
+}
+async function editLienFFHB(id){
+  const e = equipes.find(x=>x.id===id); if(!e) return;
+  const saisie = prompt(
+    `Lien FFHB de \u00AB ${e.nom} \u00BB\n(adresse de la page de poule sur ffhandball.fr \u2014 laisse vide pour retirer le lien)`,
+    e.lien_ffhb || "https://www.ffhandball.fr/");
+  if(saisie===null) return;                       // annule
+  const lien = saisie.trim();
+  if(lien && !/^https:\/\//i.test(lien)){ toast("Le lien doit commencer par https://"); return; }
+  if(lien === (e.lien_ffhb||"")) return;          // rien change
+  const {error} = await db.rpc("maj_lien_ffhb", {p_token:AUTH.token, p_equipe:id, p_lien:lien});
+  if(rpcError(error)) return;
+  await loadAll(); render();
+  toast(lien ? `Lien FFHB de ${e.nom} enregistr\u00E9 \uD83D\uDD17` : `Lien FFHB de ${e.nom} retir\u00E9`);
 }
 function matchCard(m){
   const f = fmtDate(m.date_match);
