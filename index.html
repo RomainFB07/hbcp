@@ -453,13 +453,14 @@ function render(){
   if(isGest()) VIEWS.push({id:"joueurs", label:"👥 Joueurs"});
   if(isGest()) VIEWS.push({id:"werolog", label:"💶 Wero reçus"});
   if(isGest()) VIEWS.push({id:"compta", label:"📒 Comptabilité"});
+  if(isSuper()) VIEWS.push({id:"presence", label:"👀 Connexions"});
   const cur = VIEWS.find(v=>v.id===view) || VIEWS[0];
   const mn = document.getElementById("mainNav");
   mn.style.display = "flex";
   mn.innerHTML = `
     <div class="drawer-bg" id="drawerBg" onclick="closeMenu()"></div>
     <div class="drawer" id="drawer">
-      <div class="d-brand"><b>HBC PILAT SG</b><span>La Caisse Noire · Saison 2026-27 · v2.13.0</span></div>
+      <div class="d-brand"><b>HBC PILAT SG</b><span>La Caisse Noire · Saison 2026-27 · v2.14.0</span></div>
       ${VIEWS.map(v=>`<button class="menu-item ${v.id===view?'on':''}" onclick="setView('${v.id}')">
         <span>${v.label}</span>${v.badge?`<span class="badge">${v.badge}</span>`:""}</button>`).join("")}
       <div style="border-top:1.5px solid var(--line);margin-top:10px;padding-top:8px">
@@ -481,6 +482,7 @@ function render(){
   else if(view==="futs"){ app.innerHTML = `<div class="empty">Chargement…</div>`; chargerFuts(); }
   else if(view==="werolog"){ app.innerHTML = `<div class="empty">Chargement…</div>`; chargerWeroLog(); }
   else if(view==="compta"){ app.innerHTML = `<div class="empty">Chargement…</div>`; chargerCompta(); }
+  else if(view==="presence"){ app.innerHTML = `<div class="empty">Chargement…</div>`; chargerPresence(); }
   else app.innerHTML = renderJoueurs();
 }
 
@@ -2180,6 +2182,102 @@ function toast(msg){
   toastTimer=setTimeout(()=>t.classList.remove("show"),2600);
 }
 
+/* =====================================================================
+   👀 CONNEXIONS — suivi des ouvertures de l'app (super gestionnaire)
+   Enregistre uniquement QUI ouvre l'app et QUAND (jamais les pages vues).
+   Anti-doublon côté serveur : 1 pointage max toutes les 30 min.
+===================================================================== */
+function appareilLabel(){
+  const ua = navigator.userAgent || "";
+  let os = "Appareil inconnu";
+  if(/iPhone/i.test(ua))            os = "iPhone";
+  else if(/iPad/i.test(ua))         os = "iPad";
+  else if(/Android/i.test(ua))      os = "Android";
+  else if(/Macintosh|Mac OS X/i.test(ua)) os = "Mac";
+  else if(/Windows/i.test(ua))      os = "Windows";
+  else if(/Linux/i.test(ua))        os = "Linux";
+  let installee = false;
+  try {
+    installee = (window.matchMedia && window.matchMedia("(display-mode: standalone)").matches)
+                || window.navigator.standalone === true;
+  } catch(e){}
+  return os + (installee ? " · app installée" : " · navigateur");
+}
+let dernierPointage = 0;
+async function pointerPresence(){
+  if(!AUTH) return;
+  if(Date.now() - dernierPointage < 15*60*1000) return;   // garde-fou local
+  dernierPointage = Date.now();
+  try { await db.rpc("pointer_presence", {p_token:AUTH.token, p_appareil:appareilLabel()}); } catch(e){}
+}
+document.addEventListener("visibilitychange", ()=>{
+  if(document.visibilityState === "visible") pointerPresence();
+});
+
+function ilYA(iso){
+  if(!iso) return "jamais";
+  const min = Math.floor((Date.now() - new Date(iso).getTime())/60000);
+  if(min < 2)     return "à l'instant";
+  if(min < 60)    return `il y a ${min} min`;
+  const h = Math.floor(min/60);
+  if(h < 24)      return `il y a ${h} h`;
+  const j = Math.floor(h/24);
+  if(j === 1)     return "hier";
+  if(j < 31)      return `il y a ${j} jours`;
+  const m = Math.floor(j/30);
+  return m < 2 ? "il y a 1 mois" : `il y a ${m} mois`;
+}
+let presences = [];
+async function chargerPresence(){
+  const {data, error} = await db.rpc("lister_connexions", {p_token:AUTH.token});
+  if(error){ document.getElementById("app").innerHTML = `<div class="empty">⚠️ ${esc(error.message)}</div>`; return; }
+  presences = data || [];
+  document.getElementById("app").innerHTML = renderPresence();
+}
+function renderPresence(){
+  const actifs  = presences.filter(p=>p.actif);
+  const vus7    = actifs.filter(p=>Number(p.vues_7j) > 0);
+  const jamais  = actifs.filter(p=>!p.derniere_connexion);
+  const chip = (n,lbl,color) => `<div style="flex:1;text-align:center;background:var(--bleu-pale);border-radius:10px;padding:8px 4px">
+      <div style="font-family:'Archivo Black';font-size:17px;color:${color||"var(--bleu-fonce)"}">${n}</div>
+      <div style="font-size:10.5px;color:var(--txt-dim)">${lbl}</div></div>`;
+
+  const ligne = p => {
+    const nom = p.nom || "?";
+    const froid = !p.derniere_connexion;
+    return `<div class="ticket"><div class="t-head">
+      <div style="display:flex;align-items:center;gap:9px;flex:1;min-width:0">
+        <span class="avatar" style="background:${avatarColor(nom)};flex:none">${esc(nom.slice(0,2).toUpperCase())}</span>
+        <div style="min-width:0">
+          <div class="t-motif" style="font-size:14.5px">${esc(nom)}${p.actif?"":' <span style="color:var(--txt-dim);font-size:12px">(retiré)</span>'}</div>
+          <div class="t-meta">${froid ? "aucune ouverture enregistrée"
+            : `${fmtDMH(p.derniere_connexion)} · ${esc(p.appareil||"appareil inconnu")}`}</div>
+        </div>
+      </div>
+      <div style="text-align:right;flex:none">
+        <div style="font-family:'Archivo Black';font-size:13px;color:${froid?"var(--txt-dim)":"var(--billet)"}">${ilYA(p.derniere_connexion)}</div>
+        <div style="font-size:11px;color:var(--txt-dim)">${p.vues_7j} cette sem. · ${p.vues_30j} / 30 j</div>
+      </div>
+    </div></div>`;
+  };
+
+  return `
+    <div class="section-label">👀 Connexions à l'application</div>
+    <div class="empty" style="margin-bottom:12px;text-align:left">
+      Écran visible du <b>super gestionnaire</b> seul. Seule l'<b>ouverture de l'app</b> est
+      enregistrée (date + type d'appareil) — <b>aucune page consultée</b>, aucun clic.
+      Une ouverture est comptée au maximum toutes les 30 min, et l'historique est purgé à 120 jours.
+      Pense à prévenir l'équipe que cette information existe.
+    </div>
+    <div style="display:flex;gap:7px;margin-bottom:14px">
+      ${chip(`${vus7.length}/${actifs.length}`, "vus cette semaine", "var(--billet)")}
+      ${chip(jamais.length, "jamais connectés", jamais.length?"var(--amende)":"var(--billet)")}
+      ${chip(actifs.reduce((s,p)=>s+Number(p.vues_30j),0), "ouvertures / 30 j")}
+    </div>
+    ${presences.length ? presences.map(ligne).join("") : `<div class="empty">Aucune donnée — le suivi démarre à la prochaine ouverture de l'app par chacun.</div>`}
+    <div class="empty" style="margin-top:12px">Les joueurs sont triés du plus récemment vu au plus ancien.</div>`;
+}
+
 /* GO */
 (async ()=>{
   // tâche automatique idempotente : cotisation du 1er du mois pour tous
@@ -2187,6 +2285,7 @@ function toast(msg){
   initPush();
   if(await loadAll()){
     render();
+    pointerPresence();
     verifierIntentionPaiement();
     if(!document.getElementById("overlay")?.classList.contains("open")) verifierIntentionDon();
   }
