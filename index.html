@@ -158,7 +158,7 @@
   .empty{text-align:center;color:var(--txt-dim);font-size:14px;padding:24px 10px;border:1.5px dashed var(--line);border-radius:var(--radius);background:rgba(255,255,255,.5)}
   .loading{text-align:center;color:var(--txt-dim);padding:40px 0;font-size:14px}
 
-  .bareme-row{display:flex;align-items:center;gap:10px;background:var(--paper);color:var(--txt);border-radius:12px;padding:11px 13px;margin-bottom:8px;box-shadow:0 2px 8px rgba(4,95,159,.07)}
+  .bareme-row{display:flex;flex-wrap:wrap;align-items:center;gap:10px;background:var(--paper);color:var(--txt);border-radius:12px;padding:11px 13px;margin-bottom:8px;box-shadow:0 2px 8px rgba(4,95,159,.07)}
   .bareme-row .motif{flex:1;font-weight:600;font-size:14px}
   .bareme-row input[type=number]{width:64px;border:1.5px solid var(--line);border-radius:8px;font-family:'Archivo Black';font-size:15px;text-align:center;padding:6px 4px;color:var(--amende);background:#fff}
   .bareme-row .eur{font-family:'Archivo Black';color:var(--amende)}
@@ -383,7 +383,7 @@ function rpcError(error){
 async function loadAll(){
   const [eq, jo, ba, am, ma, ins, ap, pa, tm, dn] = await Promise.all([
     db.from("equipes").select().order("nom"),
-    db.from("joueurs").select("id,nom,role,actif,en_attente,dispense_cotisation").order("nom"),
+    db.from("joueurs").select("id,nom,role,actif,en_attente,dispense_cotisation,mineur").order("nom"),
     db.from("bareme").select().eq("actif",true).order("ordre"),
     db.from("amendes").select("*, joueurs!amendes_joueur_id_fkey(nom)").order("date_amende",{ascending:false}),
     db.from("matchs").select("*, equipes(nom,couleur), inscriptions(*, joueurs(nom))")
@@ -460,7 +460,7 @@ function render(){
   mn.innerHTML = `
     <div class="drawer-bg" id="drawerBg" onclick="closeMenu()"></div>
     <div class="drawer" id="drawer">
-      <div class="d-brand"><b>HBC PILAT SG</b><span>La Caisse Noire · Saison 2026-27 · v2.14.0</span></div>
+      <div class="d-brand"><b>HBC PILAT SG</b><span>La Caisse Noire · Saison 2026-27 · v2.15.0</span></div>
       ${VIEWS.map(v=>`<button class="menu-item ${v.id===view?'on':''}" onclick="setView('${v.id}')">
         <span>${v.label}</span>${v.badge?`<span class="badge">${v.badge}</span>`:""}</button>`).join("")}
       <div style="border-top:1.5px solid var(--line);margin-top:10px;padding-top:8px">
@@ -1596,12 +1596,16 @@ function renderJoueurs(){
       <span class="avatar" style="background:${dim?"#a7b6c4":avatarColor(j.nom)};width:28px;height:28px;border-radius:50%;flex:none;display:flex;align-items:center;justify-content:center;font-family:'Archivo Black';font-size:11px;color:#fff">${esc(j.nom.slice(0,2).toUpperCase())}</span>
       <div class="motif" style="cursor:pointer" onclick="ficheJoueur('${j.id}')">${esc(j.nom)}${j.id===AUTH.id?" (toi)":""} <span style="font-size:11px;color:var(--bleu)">fiche ›</span>
         ${ROLES[j.role]?`<span class="gest-badge" style="margin-left:6px">${j.role==="super"?"SUPER":"GESTIONNAIRE"}</span>`:""}
-        ${j.dispense_cotisation?`<span style="margin-left:6px;font-size:10px;font-weight:800;letter-spacing:.04em;color:#fff;background:var(--attente);border-radius:6px;padding:2px 6px">🩹 DISPENSÉ</span>`:""}</div>
+        ${j.mineur?`<span style="margin-left:6px;font-size:10px;font-weight:800;letter-spacing:.04em;color:#fff;background:var(--bleu);border-radius:6px;padding:2px 6px">🧒 MINEUR</span>`
+          :j.dispense_cotisation?`<span style="margin-left:6px;font-size:10px;font-weight:800;letter-spacing:.04em;color:#fff;background:var(--attente);border-radius:6px;padding:2px 6px">🩹 DISPENSÉ</span>`:""}</div>
       ${canManage(j) ? (dim
         ? `<button class="mini" style="border:0;background:none;cursor:pointer;font-family:'Archivo';font-weight:700;font-size:12px;color:var(--billet)" onclick="gererJoueur('${j.id}','reactiver','${esc(j.nom)}')">Réactiver ↩</button>${isSuper()?`<button class="mini" style="border:0;background:none;cursor:pointer;font-family:'Archivo';font-weight:700;font-size:12px;color:var(--amende)" onclick="supprimerJoueur('${j.id}','${esc(j.nom)}')">Supprimer 🗑</button>`:""}`
         : `<button class="mini" style="border:0;background:none;cursor:pointer;font-family:'Archivo';font-weight:700;font-size:12px;color:var(--bleu-fonce)" onclick="renommerJoueur('${j.id}','${esc(j.nom)}')">Renommer ✏️</button>
            <button class="mini" style="border:0;background:none;cursor:pointer;font-family:'Archivo';font-weight:700;font-size:12px;color:var(--bleu)" onclick="resetPin('${j.id}','${esc(j.nom)}')">PIN ↺</button>
-           <button class="mini" style="border:0;background:none;cursor:pointer;font-family:'Archivo';font-weight:700;font-size:12px;color:${j.dispense_cotisation?"var(--billet)":"var(--attente)"}" onclick="basculerDispense('${j.id}','${esc(j.nom)}',${j.dispense_cotisation?"false":"true"})">${j.dispense_cotisation?"Réintégrer 💪":"Dispenser 🩹"}</button>
+           ${j.mineur
+             ? `<button class="mini" style="border:0;background:none;cursor:pointer;font-family:'Archivo';font-weight:700;font-size:12px;color:var(--billet)" onclick="definirMineur('${j.id}','${esc(j.nom)}',false)">Passer senior 🎂</button>`
+             : `<button class="mini" style="border:0;background:none;cursor:pointer;font-family:'Archivo';font-weight:700;font-size:12px;color:${j.dispense_cotisation?"var(--billet)":"var(--attente)"}" onclick="basculerDispense('${j.id}','${esc(j.nom)}',${j.dispense_cotisation?"false":"true"})">${j.dispense_cotisation?"Réintégrer 💪":"Dispenser 🩹"}</button>
+                ${j.dispense_cotisation?"":`<button class="mini" style="border:0;background:none;cursor:pointer;font-family:'Archivo';font-weight:700;font-size:12px;color:var(--bleu)" onclick="definirMineur('${j.id}','${esc(j.nom)}',true)">Mineur 🧒</button>`}`}
            <button class="mini" style="border:0;background:none;cursor:pointer;font-family:'Archivo';font-weight:700;font-size:12px;color:var(--amende)" onclick="retirerJoueur('${j.id}','${esc(j.nom)}')">Retirer ✕</button>`)
         : ""}
     </div>`;
@@ -1613,6 +1617,7 @@ function renderJoueurs(){
           <span class="avatar" style="background:${avatarColor(j.nom)};width:28px;height:28px;border-radius:50%;flex:none;display:flex;align-items:center;justify-content:center;font-family:'Archivo Black';font-size:11px;color:#fff">${esc(j.nom.slice(0,2).toUpperCase())}</span>
           <div class="motif">${esc(j.nom)}</div>
           <button class="mini" style="border:0;background:none;cursor:pointer;font-family:'Archivo';font-weight:700;font-size:12px;color:var(--billet)" onclick="traiterInscription('${j.id}','${esc(j.nom)}','approuver')">Accepter ✓</button>
+          <button class="mini" style="border:0;background:none;cursor:pointer;font-family:'Archivo';font-weight:700;font-size:12px;color:var(--bleu)" onclick="traiterInscription('${j.id}','${esc(j.nom)}','approuver',true)">Accepter mineur 🧒</button>
           <button class="mini" style="border:0;background:none;cursor:pointer;font-family:'Archivo';font-weight:700;font-size:12px;color:var(--amende)" onclick="traiterInscription('${j.id}','${esc(j.nom)}','refuser')">Refuser ✕</button>
         </div>`).join("")}` : ""}
     <div class="section-label">Joueurs (${actifs.length})</div>
@@ -1625,15 +1630,35 @@ function renderJoueurs(){
       (solde, amendes, paiements, tables de marque, casse-croûtes, apéros).<br>
       « Renommer ✏️ » corrige le nom (ex : distinguer deux prénoms identiques).
       « PIN ↺ » réinitialise le code d'un joueur qui l'a oublié.
+      « Mineur 🧒 » exempte définitivement le joueur de la cotisation 🍺 (il reste
+      soumis aux amendes et apparaît dans tous les classements) ; « Passer senior 🎂 »
+      le remet à la cotisation.
       Un joueur retiré garde son historique et peut être réactivé.${isSuper()?"<br>« Supprimer 🗑 » (super gestionnaire) efface définitivement un joueur retiré, sauf s'il a des contributions validées.":""}
     </div>`;
 }
-async function traiterInscription(id, nom, decision){
+async function traiterInscription(id, nom, decision, mineur){
   if(decision==="refuser" && !confirm(`Refuser l'inscription de ${nom} ?\nSon compte sera supprimé.`)) return;
+  if(mineur && !confirm(`Accepter ${nom} comme joueur mineur 🧒 ?\n\nIl ne sera jamais soumis à la cotisation mensuelle « Achat bière + softs ».\nIl reste un joueur normal pour les amendes, les engagements et les classements.\n\n(Réversible à sa majorité avec « Passer senior 🎂 ».)`)) return;
   const {error} = await db.rpc("traiter_inscription", {p_token:AUTH.token, p_cible:id, p_decision:decision});
   if(rpcError(error)) return;
+  if(mineur){
+    const {error:e2} = await db.rpc("definir_mineur", {p_token:AUTH.token, p_cible:id, p_mineur:true});
+    if(rpcError(e2)) return;
+  }
   await loadAll(); render();
-  toast(decision==="approuver" ? `${nom} rejoint l'équipe ! 🎉` : `Inscription de ${nom} refusée`);
+  toast(decision==="approuver"
+    ? (mineur ? `${nom} rejoint l'équipe (mineur 🧒) !` : `${nom} rejoint l'équipe ! 🎉`)
+    : `Inscription de ${nom} refusée`);
+}
+async function definirMineur(id, nom, mineur){
+  const msg = mineur
+    ? `Marquer ${nom} comme joueur mineur 🧒 ?\n\nLa cotisation mensuelle « Achat bière + softs » ne lui sera plus jamais appliquée, et celle du mois en cours sera retirée s'il n'a encore rien réglé.\n\nIl reste un joueur normal pour les amendes, les engagements et les classements.`
+    : `${nom} passe senior 🎂 ?\n\nIl redevient cotisant. Attention : la cotisation du mois EN COURS lui sera appliquée au prochain chargement de l'app — à faire de préférence le 1er du mois.`;
+  if(!confirm(msg)) return;
+  const {error} = await db.rpc("definir_mineur", {p_token:AUTH.token, p_cible:id, p_mineur:mineur});
+  if(rpcError(error)) return;
+  await loadAll(); render();
+  toast(mineur ? `${nom} est marqué mineur 🧒` : `${nom} passe senior 🎂`);
 }
 async function basculerDispense(id, nom, dispense){
   const msg = dispense
