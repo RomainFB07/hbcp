@@ -333,6 +333,10 @@ function seasonStart(){
   return `${y}-07-01`;
 }
 function esc(s){return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;")}
+/* jsq() = valeur destinée à un argument de onclick="...('ICI')".
+   Le navigateur décode les entités HTML AVANT de parser le JS : il faut donc
+   échapper d'abord au niveau JS (\ et '), puis au niveau HTML. */
+function jsq(s){return esc(String(s).replace(/\\/g,"\\\\").replace(/'/g,"\\'").replace(/\r?\n/g," "))}
 
 const isGest  = () => AUTH && (AUTH.role==="gestionnaire" || AUTH.role==="super");
 const isSuper = () => AUTH && AUTH.role==="super";
@@ -466,7 +470,7 @@ function render(){
   mn.innerHTML = `
     <div class="drawer-bg" id="drawerBg" onclick="closeMenu()"></div>
     <div class="drawer" id="drawer">
-      <div class="d-brand"><b>HBC PILAT SG</b><span>La Caisse Noire · Saison 2026-27 · v2.15.1</span></div>
+      <div class="d-brand"><b>HBC PILAT SG</b><span>La Caisse Noire · Saison 2026-27 · v2.15.2</span></div>
       ${VIEWS.map(v=>`<button class="menu-item ${v.id===view?'on':''}" onclick="setView('${v.id}')">
         <span>${v.label}</span>${v.badge?`<span class="badge">${v.badge}</span>`:""}</button>`).join("")}
       <div style="border-top:1.5px solid var(--line);margin-top:10px;padding-top:8px">
@@ -676,7 +680,7 @@ function renderCompte(){
               <div class="motif">${esc(r.j.nom)} <span style="color:var(--amende);font-family:'Archivo Black'">${r.du} €</span> <span style="color:var(--txt-dim);font-size:12px">dus des mois précédents</span></div>
               ${r.deja
                 ? `<span style="font-size:12px;color:var(--txt-dim)">majoration appliquée ✓</span>`
-                : `<button class="btn btn-no" style="padding:6px 10px;font-size:12px" onclick="appliquerMajoration('${r.j.id}','${esc(r.j.nom)}')">+2 € retard</button>`}
+                : `<button class="btn btn-no" style="padding:6px 10px;font-size:12px" onclick="appliquerMajoration('${r.j.id}','${jsq(r.j.nom)}')">+2 € retard</button>`}
             </div>`).join("");
       }
     }
@@ -771,10 +775,13 @@ function ligneAmende(a, withNom){
     <div class="t-meta">${fmtDM(a.date_amende)}</div></div>
     <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px">
       <div class="t-montant due">${a.montant} €</div>
-      ${annulable ? `<button class="mini" style="border:0;background:none;cursor:pointer;font-family:'Archivo';font-weight:700;font-size:11.5px;color:var(--txt-dim);text-decoration:underline" onclick="annulerAmende('${a.id}','${esc(a.joueurs?.nom||"")}','${esc(a.motif)}',${a.montant})">annuler</button>` : ""}
+      ${annulable ? `<button class="mini" style="border:0;background:none;cursor:pointer;font-family:'Archivo';font-weight:700;font-size:11.5px;color:var(--txt-dim);text-decoration:underline" onclick="annulerAmende('${a.id}')">annuler</button>` : ""}
     </div></div></div>`;
 }
-async function annulerAmende(id, nom, motif, montant){
+async function annulerAmende(id){
+  const a = amendes.find(x=>x.id===id);
+  if(!a){ toast("Amende introuvable — recharge la page ↺"); return; }
+  const nom = a.joueurs?.nom || "", motif = a.motif, montant = a.montant;
   if(!confirm(`Annuler l'amende « ${motif} » (${montant} €)${nom?` de ${nom}`:""} ?\nElle sera définitivement supprimée de son solde.`)) return;
   const {error} = await db.rpc("annuler_amende", {p_token:AUTH.token, p_id:id});
   if(error){
@@ -796,18 +803,33 @@ function openAmendeForm(){
       <select id="fJoueur">${joueurs.map(j=>`<option value="${j.id}">${esc(j.nom)}</option>`).join("")}</select></div>
     <div class="field"><label>Motif (barème)</label>
       <select id="fBareme">${bareme.map(b=>`<option value="${b.id}">${esc(b.motif)} — ${b.montant} €</option>`).join("")}</select></div>
-    <button class="btn btn-pay btn-full" onclick="donnerAmende()">💸 Amende !</button>`);
+    <button class="btn btn-pay btn-full" id="btnAmende" onclick="donnerAmende(this)">💸 Amende !</button>`);
 }
-async function donnerAmende(){
-  const {error} = await db.rpc("donner_amende", {
-    p_token:AUTH.token,
-    p_joueur:document.getElementById("fJoueur").value,
-    p_bareme:document.getElementById("fBareme").value
-  });
-  closeModal();
-  if(rpcError(error)) return;
-  await loadAll(); render();
-  toast("Amende distribuée 💸");
+let amendeEnCours = false;
+async function donnerAmende(btn){
+  /* Verrou anti double-clic : le bouton restait cliquable pendant
+     l'aller-retour réseau, ce qui pouvait créer 2 amendes identiques. */
+  if(amendeEnCours) return;
+  amendeEnCours = true;
+  if(btn){ btn.disabled = true; btn.style.opacity = ".55"; btn.textContent = "⏳ Envoi…"; }
+  try{
+    const {error} = await db.rpc("donner_amende", {
+      p_token:AUTH.token,
+      p_joueur:document.getElementById("fJoueur").value,
+      p_bareme:document.getElementById("fBareme").value
+    });
+    closeModal();
+    if(error && (error.message||"").includes("DOUBLON_AMENDE")){
+      toast("Double clic ignoré ✋ — l'amende était déjà enregistrée");
+      await loadAll(); render();
+      return;
+    }
+    if(rpcError(error)) return;
+    await loadAll(); render();
+    toast("Amende distribuée 💸");
+  } finally {
+    amendeEnCours = false;
+  }
 }
 
 /* ---- paiement du solde ---- */
@@ -1611,15 +1633,15 @@ function renderJoueurs(){
           :j.dispense_cotisation?`<span style="margin-left:6px;font-size:10px;font-weight:800;letter-spacing:.04em;color:#fff;background:var(--attente);border-radius:6px;padding:2px 6px">🩹 DISPENSÉ</span>`:""}</div>
       ${canManage(j) ? `<button class="j-gerer ${actionsJoueur===j.id?"open":""}" onclick="togglerActions('${j.id}')">${actionsJoueur===j.id?"Fermer ✕":"Gérer ⚙️"}</button>` : ""}
       ${canManage(j) && actionsJoueur===j.id ? `<div class="j-panel">${dim
-        ? `<button class="j-act" onclick="gererJoueur('${j.id}','reactiver','${esc(j.nom)}')">Réactiver ↩</button>
-           ${isSuper()?`<button class="j-act danger" onclick="supprimerJoueur('${j.id}','${esc(j.nom)}')">Supprimer définitivement 🗑</button>`:""}`
-        : `<button class="j-act" onclick="renommerJoueur('${j.id}','${esc(j.nom)}')">Renommer ✏️</button>
-           <button class="j-act" onclick="resetPin('${j.id}','${esc(j.nom)}')">Réinitialiser le PIN ↺</button>
+        ? `<button class="j-act" onclick="gererJoueur('${j.id}','reactiver','${jsq(j.nom)}')">Réactiver ↩</button>
+           ${isSuper()?`<button class="j-act danger" onclick="supprimerJoueur('${j.id}','${jsq(j.nom)}')">Supprimer définitivement 🗑</button>`:""}`
+        : `<button class="j-act" onclick="renommerJoueur('${j.id}','${jsq(j.nom)}')">Renommer ✏️</button>
+           <button class="j-act" onclick="resetPin('${j.id}','${jsq(j.nom)}')">Réinitialiser le PIN ↺</button>
            ${j.mineur
-             ? `<button class="j-act" onclick="definirMineur('${j.id}','${esc(j.nom)}',false)">Passer senior 🎂</button>`
-             : `<button class="j-act warn" onclick="basculerDispense('${j.id}','${esc(j.nom)}',${j.dispense_cotisation?"false":"true"})">${j.dispense_cotisation?"Réintégrer 💪":"Dispenser 🩹"}</button>
-                ${j.dispense_cotisation?"":`<button class="j-act" onclick="definirMineur('${j.id}','${esc(j.nom)}',true)">Marquer mineur 🧒</button>`}`}
-           <button class="j-act danger" onclick="retirerJoueur('${j.id}','${esc(j.nom)}')">Retirer de l'équipe ✕</button>`}</div>` : ""}
+             ? `<button class="j-act" onclick="definirMineur('${j.id}','${jsq(j.nom)}',false)">Passer senior 🎂</button>`
+             : `<button class="j-act warn" onclick="basculerDispense('${j.id}','${jsq(j.nom)}',${j.dispense_cotisation?"false":"true"})">${j.dispense_cotisation?"Réintégrer 💪":"Dispenser 🩹"}</button>
+                ${j.dispense_cotisation?"":`<button class="j-act" onclick="definirMineur('${j.id}','${jsq(j.nom)}',true)">Marquer mineur 🧒</button>`}`}
+           <button class="j-act danger" onclick="retirerJoueur('${j.id}','${jsq(j.nom)}')">Retirer de l'équipe ✕</button>`}</div>` : ""}
     </div>`;
   return `
     ${attente.length ? `
@@ -1628,9 +1650,9 @@ function renderJoueurs(){
         <div class="bareme-row">
           <span class="avatar" style="background:${avatarColor(j.nom)};width:28px;height:28px;border-radius:50%;flex:none;display:flex;align-items:center;justify-content:center;font-family:'Archivo Black';font-size:11px;color:#fff">${esc(j.nom.slice(0,2).toUpperCase())}</span>
           <div class="motif">${esc(j.nom)}</div>
-          <button class="mini" style="border:0;background:none;cursor:pointer;font-family:'Archivo';font-weight:700;font-size:12px;color:var(--billet)" onclick="traiterInscription('${j.id}','${esc(j.nom)}','approuver')">Accepter ✓</button>
-          <button class="mini" style="border:0;background:none;cursor:pointer;font-family:'Archivo';font-weight:700;font-size:12px;color:var(--bleu)" onclick="traiterInscription('${j.id}','${esc(j.nom)}','approuver',true)">Accepter mineur 🧒</button>
-          <button class="mini" style="border:0;background:none;cursor:pointer;font-family:'Archivo';font-weight:700;font-size:12px;color:var(--amende)" onclick="traiterInscription('${j.id}','${esc(j.nom)}','refuser')">Refuser ✕</button>
+          <button class="mini" style="border:0;background:none;cursor:pointer;font-family:'Archivo';font-weight:700;font-size:12px;color:var(--billet)" onclick="traiterInscription('${j.id}','${jsq(j.nom)}','approuver')">Accepter ✓</button>
+          <button class="mini" style="border:0;background:none;cursor:pointer;font-family:'Archivo';font-weight:700;font-size:12px;color:var(--bleu)" onclick="traiterInscription('${j.id}','${jsq(j.nom)}','approuver',true)">Accepter mineur 🧒</button>
+          <button class="mini" style="border:0;background:none;cursor:pointer;font-family:'Archivo';font-weight:700;font-size:12px;color:var(--amende)" onclick="traiterInscription('${j.id}','${jsq(j.nom)}','refuser')">Refuser ✕</button>
         </div>`).join("")}` : ""}
     <div class="section-label">Joueurs (${actifs.length})</div>
     ${actifs.map(j=>row(j,false)).join("")}
@@ -1920,7 +1942,7 @@ function dutyBlock(m, section, places){
     const isMe = i.joueur_id===AUTH.id;
     let action="";
     if(isMe) action=`<button class="mini leave" onclick="seDesinscrire('${m.id}','${section}')">Me désinscrire</button>`;
-    else if(isGest()) action=`<button class="mini kick" onclick="retirer('${i.id}','${esc(nom)}')">Retirer ✕</button>`;
+    else if(isGest()) action=`<button class="mini kick" onclick="retirer('${i.id}','${jsq(nom)}')">Retirer ✕</button>`;
     return `<div class="slot ${isMe?"me":""}">
       <div class="avatar" style="background:${avatarColor(nom)}">${esc(nom.slice(0,2).toUpperCase())}</div>
       <div class="who">${esc(nom)}${isMe?" (toi)":""}</div>${action}</div>`;
@@ -2062,7 +2084,7 @@ function aperoCard(a){
     const isMe = i.joueur_id===AUTH.id;
     let action="";
     if(isMe) action=`<button class="mini leave" onclick="seDesinscrireApero('${a.id}')">Me désinscrire</button>`;
-    else if(isGest()) action=`<button class="mini kick" onclick="retirerApero('${i.id}','${esc(nom)}')">Retirer ✕</button>`;
+    else if(isGest()) action=`<button class="mini kick" onclick="retirerApero('${i.id}','${jsq(nom)}')">Retirer ✕</button>`;
     return `<div class="slot ${isMe?"me":""}">
       <div class="avatar" style="background:${avatarColor(nom)}">${esc(nom.slice(0,2).toUpperCase())}</div>
       <div class="who">${esc(nom)}${isMe?" (toi)":""}</div>${action}</div>`;
