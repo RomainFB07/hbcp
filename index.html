@@ -341,32 +341,74 @@ function jsq(s){return esc(String(s).replace(/\\/g,"\\\\").replace(/'/g,"\\'").r
 const isGest  = () => AUTH && (AUTH.role==="gestionnaire" || AUTH.role==="super");
 const isSuper = () => AUTH && AUTH.role==="super";
 
-/* SOLDE (option A) = cotisations + max(0, autres amendes − crédits) − paiements
-   → les crédits d'engagement n'effacent JAMAIS la cotisation boissons
+/* SOLDE — REGISTRE CHRONOLOGIQUE (v2.16.0)
+   Les trois flux d'un joueur (amendes, crédits d'engagement, paiements) sont
+   rejoués dans l'ordre réel où ils se sont produits. Règles appliquées :
+   • un crédit d'engagement n'efface qu'une amende ENCORE DUE au moment où il
+     est validé, ou une amende reçue après — jamais une amende déjà réglée
+     (sinon le paiement correspondant se reportait sur la cotisation) ;
+   • les crédits n'effacent JAMAIS la cotisation « Achat bière + softs » ;
+   • un paiement rembourse la cotisation en priorité, puis les amendes ;
+   • un trop-perçu reste en avance et sert avant les crédits sur la suite.
    NB : la cotisation est reconnue par « (cotisation mensuelle) » dans son
    libellé — ne jamais créer d'autre motif de barème contenant ces mots. */
 const estCotisation = a => (a.motif||"").includes("cotisation mensuelle");
-function _parts(id){
-  const cotis  = amendes.filter(a=>a.joueur_id===id && estCotisation(a)).reduce((s,a)=>s+Number(a.montant),0);
-  const autres = amendes.filter(a=>a.joueur_id===id && !estCotisation(a)).reduce((s,a)=>s+Number(a.montant),0);
-  const cr = tablesMarque.filter(t=>t.joueur_id===id && t.statut==="valide").reduce((s,t)=>s+Number(t.montant),0);
-  const pa = paiements.filter(p=>p.joueur_id===id && p.statut==="valide").reduce((s,p)=>s+Number(p.montant),0);
-  return {cotis, autres, cr, pa};
+const _r2  = n => Math.round(n*100)/100;
+const _ts  = v => { const t = Date.parse(v||""); return isNaN(t) ? 0 : t; };
+/* cutAmendes (optionnel) : timestamp — ignore les amendes datées à partir de
+   ce moment-là (sert au calcul des retards « dus des mois précédents »). */
+function _parts(id, cutAmendes){
+  const lim = (cutAmendes==null) ? Infinity : cutAmendes;
+  const ev = [];
+  amendes.filter(a=>a.joueur_id===id)
+    .forEach(a=>ev.push({t:_ts(a.date_amende), k:estCotisation(a)?"cot":"am", m:Number(a.montant)||0}));
+  tablesMarque.filter(t=>t.joueur_id===id && t.statut==="valide")
+    .forEach(t=>ev.push({t:_ts(t.valide_le||t.declare_le), k:"cr", m:Number(t.montant)||0}));
+  paiements.filter(p=>p.joueur_id===id && p.statut==="valide")
+    .forEach(p=>ev.push({t:_ts(p.valide_le||p.declare_le), k:"pa", m:Number(p.montant)||0}));
+  const rang = {cr:0, pa:1, cot:2, am:3};
+  ev.sort((x,y)=> (x.t-y.t) || (rang[x.k]-rang[y.k]));
+
+  let cotis=0, autres=0, cr=0, pa=0, crUtil=0, paCotis=0;
+  let dCot=0, dAm=0, res=0, av=0;   // dus en cours, réserve de crédits, avance
+  for(const e of ev){
+    if(e.k==="cot"){
+      if(e.t >= lim) continue;
+      cotis += e.m;
+      const u = Math.min(av, e.m); av -= u; paCotis += u; dCot += e.m - u;
+    } else if(e.k==="am"){
+      if(e.t >= lim) continue;
+      autres += e.m; let r = e.m;
+      const u1 = Math.min(av,  r); av  -= u1; r -= u1;   // l'argent réel d'abord
+      const u2 = Math.min(res, r); res -= u2; crUtil += u2; r -= u2;
+      dAm += r;
+    } else if(e.k==="cr"){
+      cr += e.m; res += e.m;
+      const u = Math.min(res, dAm); res -= u; dAm -= u; crUtil += u;
+    } else {
+      pa += e.m; let r = e.m;
+      const u = Math.min(r, dCot); dCot -= u; paCotis += u; r -= u;
+      const v = Math.min(r, dAm);  dAm  -= v; r -= v;
+      av += r;
+    }
+  }
+  return {cotis:_r2(cotis), autres:_r2(autres), cr:_r2(cr), pa:_r2(pa),
+          crUtil:_r2(crUtil), paCotis:_r2(paCotis), reserve:_r2(res)};
 }
 function solde(id){
-  const {cotis, autres, cr, pa} = _parts(id);
-  return Math.round((cotis + Math.max(0, autres - cr) - pa) * 100) / 100;
+  const {cotis, autres, crUtil, pa} = _parts(id);
+  return _r2(cotis + autres - crUtil - pa);
 }
-/* crédits en réserve = excédent de crédits sur les amendes-punitions */
-function reserveCredits(id){
-  const {autres, cr} = _parts(id);
-  return Math.round(Math.max(0, cr - autres) * 100) / 100;
+/* dû accumulé avant une date (retards) : les amendes postérieures sont
+   ignorées, mais tous les paiements et crédits sont pris en compte. */
+function soldeAvant(id, ts){
+  const {cotis, autres, crUtil, pa} = _parts(id, ts);
+  return _r2(cotis + autres - crUtil - pa);
 }
+/* crédits en réserve = crédits validés non encore consommés */
+function reserveCredits(id){ return _parts(id).reserve; }
 /* répartition d'un joueur entre les deux pots : cotisation payée en priorité */
-function partFuts(id){
-  const {cotis, pa} = _parts(id);
-  return Math.round(Math.min(pa, cotis) * 100) / 100;
-}
+function partFuts(id){ return _parts(id).paCotis; }
 /* DONS LIBRES — argent offert en plus à la cagnotte 🍺.
    Un don n'entre JAMAIS dans le calcul du solde : il ne réduit rien,
    il alimente à 100 % le pot Bière & softs. */
@@ -470,7 +512,7 @@ function render(){
   mn.innerHTML = `
     <div class="drawer-bg" id="drawerBg" onclick="closeMenu()"></div>
     <div class="drawer" id="drawer">
-      <div class="d-brand"><b>HBC PILAT SG</b><span>La Caisse Noire · Saison 2026-27 · v2.15.2</span></div>
+      <div class="d-brand"><b>HBC PILAT SG</b><span>La Caisse Noire · Saison 2026-27 · v2.16.0</span></div>
       ${VIEWS.map(v=>`<button class="menu-item ${v.id===view?'on':''}" onclick="setView('${v.id}')">
         <span>${v.label}</span>${v.badge?`<span class="badge">${v.badge}</span>`:""}</button>`).join("")}
       <div style="border-top:1.5px solid var(--line);margin-top:10px;padding-top:8px">
@@ -663,15 +705,12 @@ function renderCompte(){
     const now = new Date();
     if(now.getDate() >= 11){
       const monthStart = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}-01`;
+      const monthStartTs = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
       const retards = joueurs.map(j=>{
-        const avCotis  = amendes.filter(a=>a.joueur_id===j.id && a.date_amende < monthStart && estCotisation(a)).reduce((s,a)=>s+Number(a.montant),0);
-        const avAutres = amendes.filter(a=>a.joueur_id===j.id && a.date_amende < monthStart && !estCotisation(a)).reduce((s,a)=>s+Number(a.montant),0);
-        const duAvant = avCotis + Math.max(0, avAutres
-          - tablesMarque.filter(t=>t.joueur_id===j.id && t.statut==="valide").reduce((s,t)=>s+Number(t.montant),0))
-          - paiements.filter(p=>p.joueur_id===j.id && p.statut==="valide").reduce((s,p)=>s+Number(p.montant),0);
+        const duAvant = soldeAvant(j.id, monthStartTs);
         const deja = amendes.some(a=>a.joueur_id===j.id
           && a.motif==="Retard de paiement mensuel" && a.date_amende >= monthStart);
-        return {j, du:Math.round(duAvant*100)/100, deja};
+        return {j, du:duAvant, deja};
       }).filter(r=>r.du > 0);
       if(retards.length){
         out += `<div class="section-label">⏰ Retards de paiement (échéance du 10 dépassée)</div>` +
@@ -1837,7 +1876,7 @@ function ficheJoueur(id){
       ${chip((s<0?Math.abs(s):s)+" €", s<0?"avoir":"solde actuel", s>0?"var(--amende)":"var(--billet)")}
     </div>
     <div style="text-align:center;font-size:11.5px;color:var(--txt-dim);margin-bottom:10px">
-      ${(()=>{const pt=_parts(id);return `${pt.cotis} € de cotisations + max(0, ${pt.autres} € d'amendes − ${pt.cr} € de crédits) − ${pt.pa} € payés = <b>${s} €</b>${reserveCredits(id)>0?` · 🎁 réserve ${reserveCredits(id)} €`:""}`})()}
+      ${(()=>{const pt=_parts(id);return `${pt.cotis} € de cotisations + ${pt.autres} € d'amendes − ${pt.crUtil} € de crédits utilisés − ${pt.pa} € payés = <b>${s} €</b>${pt.reserve>0?` · 🎁 réserve ${pt.reserve} €`:""}`})()}
     </div>
     <div style="display:flex;gap:7px;margin-bottom:14px">
       ${chip(nbTable,"tables de marque","var(--bleu-fonce)")}
