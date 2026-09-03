@@ -311,7 +311,9 @@ let chosenMoyen = null;
 const MOIS = ["JANV","FÉVR","MARS","AVR","MAI","JUIN","JUIL","AOÛT","SEPT","OCT","NOV","DÉC"];
 const MOIS_LONG = ["janvier","février","mars","avril","mai","juin","juillet","août","septembre","octobre","novembre","décembre"];
 const MOYENS = {paypal:"PayPal", revolut:"Revolut", cash:"Espèces", wero:"Wero", lydia:"Lydia"};
-const ROLES = {super:"SUPER GESTIONNAIRE", gestionnaire:"GESTIONNAIRE"};
+const ROLES = {super:"SUPER GESTIONNAIRE", gestionnaire:"GESTIONNAIRE", coach:"COACH"};
+/* Libellé court affiché dans les pastilles à côté d'un nom. */
+const ROLES_COURT = {super:"SUPER", gestionnaire:"GESTIONNAIRE", coach:"🎯 COACH"};
 const SECTIONS = {
   casse_croute:{label:"Casse-croûte fin de match", color:"var(--bouffe)"},
 };
@@ -340,6 +342,11 @@ function jsq(s){return esc(String(s).replace(/\\/g,"\\\\").replace(/'/g,"\\'").r
 
 const isGest  = () => AUTH && (AUTH.role==="gestionnaire" || AUTH.role==="super");
 const isSuper = () => AUTH && AUTH.role==="super";
+/* COACH (v2.17.0) — rôle minimal : il distribue et annule des amendes,
+   rien d'autre. isGest() reste FAUX pour lui, donc tous les écrans et
+   toutes les fonctions gestionnaire continuent de le refuser. */
+const isCoach     = () => AUTH && AUTH.role==="coach";
+const peutAmender = () => isGest() || isCoach();
 
 /* SOLDE — REGISTRE CHRONOLOGIQUE (v2.16.0)
    Les trois flux d'un joueur (amendes, crédits d'engagement, paiements) sont
@@ -512,7 +519,7 @@ function render(){
   mn.innerHTML = `
     <div class="drawer-bg" id="drawerBg" onclick="closeMenu()"></div>
     <div class="drawer" id="drawer">
-      <div class="d-brand"><b>HBC PILAT SG</b><span>La Caisse Noire · Saison 2026-27 · v2.16.0</span></div>
+      <div class="d-brand"><b>HBC PILAT SG</b><span>La Caisse Noire · Saison 2026-27 · v2.17.0</span></div>
       ${VIEWS.map(v=>`<button class="menu-item ${v.id===view?'on':''}" onclick="setView('${v.id}')">
         <span>${v.label}</span>${v.badge?`<span class="badge">${v.badge}</span>`:""}</button>`).join("")}
       <div style="border-top:1.5px solid var(--line);margin-top:10px;padding-top:8px">
@@ -658,6 +665,17 @@ function logout(msg=true){
 ===================================================================== */
 function renderCompte(){
   let out = "";
+
+  /* ---- bloc coach : il n'a rien à valider, juste à sanctionner ---- */
+  if(isCoach()){
+    out += `<div class="section-label">🎯 Coach
+      <button class="add-mini" onclick="openAmendeForm()">+ Donner une amende</button></div>
+      <div class="empty" style="text-align:left;line-height:1.55">
+        Tu peux distribuer les amendes du barème ⚖️.<br>
+        Une erreur ? Le lien « annuler » se trouve sous chaque amende, dans
+        « 💀 Amendes de l'équipe ».
+      </div>`;
+  }
 
   /* ---- blocs gestionnaire : à valider + retards ---- */
   if(isGest()){
@@ -807,8 +825,15 @@ function renderCompte(){
 function ligneAmende(a, withNom){
   const estCotis = estCotisation(a);
   const proprio = joueursAll.find(j=>j.id===a.joueur_id) || {};
-  const annulable = isGest() && a.joueur_id !== AUTH.id
-    && (!estCotis || proprio.dispense_cotisation);
+  /* Qui peut annuler cette amende ?
+     - jamais la sienne ;
+     - gestionnaire : tout, sauf une cotisation 🍺 d'un joueur non dispensé ;
+     - coach        : tout SAUF les cotisations 🍺 (il ne peut pas dispenser,
+                      il n'a donc pas à défaire cette décision). */
+  const annulable = a.joueur_id !== AUTH.id && (
+       isGest()  ? (!estCotis || proprio.dispense_cotisation)
+     : isCoach() ? !estCotis
+     : false);
   return `<div class="ticket"><div class="t-head">
     <div><div class="t-motif">${withNom?esc(a.joueurs?.nom||"?")+" — ":""}${esc(a.motif)}</div>
     <div class="t-meta">${fmtDM(a.date_amende)}</div></div>
@@ -1667,7 +1692,7 @@ function renderJoueurs(){
     <div class="bareme-row" ${dim?'style="opacity:.65"':''}>
       <span class="avatar" style="background:${dim?"#a7b6c4":avatarColor(j.nom)};width:28px;height:28px;border-radius:50%;flex:none;display:flex;align-items:center;justify-content:center;font-family:'Archivo Black';font-size:11px;color:#fff">${esc(j.nom.slice(0,2).toUpperCase())}</span>
       <div class="motif" style="cursor:pointer" onclick="ficheJoueur('${j.id}')">${esc(j.nom)}${j.id===AUTH.id?" (toi)":""} <span style="font-size:11px;color:var(--bleu)">fiche ›</span>
-        ${ROLES[j.role]?`<span class="gest-badge" style="margin-left:6px">${j.role==="super"?"SUPER":"GESTIONNAIRE"}</span>`:""}
+        ${ROLES[j.role]?`<span class="gest-badge" style="margin-left:6px">${ROLES_COURT[j.role]}</span>`:""}
         ${j.mineur?`<span style="margin-left:6px;font-size:10px;font-weight:800;letter-spacing:.04em;color:#fff;background:var(--bleu);border-radius:6px;padding:2px 6px">🧒 MINEUR</span>`
           :j.dispense_cotisation?`<span style="margin-left:6px;font-size:10px;font-weight:800;letter-spacing:.04em;color:#fff;background:var(--attente);border-radius:6px;padding:2px 6px">🩹 DISPENSÉ</span>`:""}</div>
       ${canManage(j) ? `<button class="j-gerer ${actionsJoueur===j.id?"open":""}" onclick="togglerActions('${j.id}')">${actionsJoueur===j.id?"Fermer ✕":"Gérer ⚙️"}</button>` : ""}
@@ -1865,7 +1890,7 @@ function ficheJoueur(id){
       <div style="color:var(--txt-dim);font-size:12px">déclaré le ${fmtDMH(d.declare_le)}${d.valide_le?` · validé le ${fmtDMH(d.valide_le)}${d.valide_par?" par "+esc(nomDe(d.valide_par)):""}`:" · en attente de validation"} · sans effet sur le solde</div></div>`;
   openSheet(`
     <h3>${esc(j.nom)}${j.actif?"":" <span style='color:var(--txt-dim);font-size:13px'>(retiré)</span>"}
-      ${ROLES[j.role]?` <span class="gest-badge">${j.role==='super'?'SUPER':'GESTIONNAIRE'}</span>`:""}</h3>
+      ${ROLES[j.role]?` <span class="gest-badge">${ROLES_COURT[j.role]}</span>`:""}</h3>
     <p class="sub">Fiche complète · saison ${ss.slice(0,4)}-${(+ss.slice(0,4)+1).toString().slice(2)}</p>
     <div style="display:flex;gap:7px;margin-bottom:7px">
       ${chip(totAmendes+" €","amendes reçues","var(--amende)")}
