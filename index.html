@@ -467,6 +467,23 @@ async function loadAll(){
   /* tolérant : si la table « dons » n'existe pas encore, l'app fonctionne quand même */
   dons = (dn && !dn.error && dn.data) ? dn.data : [];
 
+  /* SYNCHRONISATION DU RÔLE (v2.17.1)
+     `AUTH` est écrit dans localStorage à la connexion et n'était jamais
+     rafraîchi : un changement de rôle en base ne prenait effet qu'à la
+     déconnexion. Conséquences : un coach promu ne voyait pas ses
+     nouveaux boutons, et surtout un gestionnaire rétrogradé gardait ses
+     droits d'affichage. On réaligne donc AUTH sur la base à chaque
+     chargement. (Le serveur, lui, a toujours été juste : il relit le
+     rôle via `_caller(p_token)` à chaque appel.) */
+  if(AUTH){
+    const moi = joueursAll.find(j=>j.id===AUTH.id);
+    if(moi && (moi.role !== AUTH.role || moi.nom !== AUTH.nom)){
+      AUTH.role = moi.role;
+      AUTH.nom  = moi.nom;
+      try{ localStorage.setItem("cn_auth", JSON.stringify(AUTH)); }catch(e){}
+    }
+  }
+
   if(AUTH && !joueurs.find(j=>j.id===AUTH.id)) logout(false);
   return true;
 }
@@ -519,7 +536,7 @@ function render(){
   mn.innerHTML = `
     <div class="drawer-bg" id="drawerBg" onclick="closeMenu()"></div>
     <div class="drawer" id="drawer">
-      <div class="d-brand"><b>HBC PILAT SG</b><span>La Caisse Noire · Saison 2026-27 · v2.17.0</span></div>
+      <div class="d-brand"><b>HBC PILAT SG</b><span>La Caisse Noire · Saison 2026-27 · v2.17.1</span></div>
       ${VIEWS.map(v=>`<button class="menu-item ${v.id===view?'on':''}" onclick="setView('${v.id}')">
         <span>${v.label}</span>${v.badge?`<span class="badge">${v.badge}</span>`:""}</button>`).join("")}
       <div style="border-top:1.5px solid var(--line);margin-top:10px;padding-top:8px">
@@ -975,9 +992,16 @@ function verifierIntentionPaiement(){
   const it = lireIntention();
   if(!it) return;
   /* intention d'un autre compte, périmée (7 j), ou déjà suivie d'une déclaration */
+  /* Même correctif que pour les dons : un paiement validé entre-temps
+     ne laissait plus rien en « pending », donc le mémo pouvait se
+     rejouer et faire déclarer un paiement en double dès que de
+     nouvelles amendes remettaient le solde au-dessus de zéro. */
+  const paiementSuivi = paiements.some(p => p.joueur_id === AUTH.id
+        && p.declare_le
+        && new Date(p.declare_le).getTime() > it.ts - 300000);
   if(it.joueur !== AUTH.id
-     || Date.now() - it.ts > 7*86400000
-     || paiements.some(p=>p.joueur_id===AUTH.id && p.statut==="pending")){
+     || Date.now() - it.ts > 2*86400000
+     || paiementSuivi){
     oublierIntention(); return;
   }
   const s = solde(AUTH.id);
@@ -1120,9 +1144,21 @@ function verifierIntentionDon(){
   if(!AUTH) return;
   const it = lireIntentionDon();
   if(!it) return;
+  /* Le mémo ne doit se rejouer QUE si le don n'a jamais été enregistré.
+     Ne chercher qu'un don « pending » était insuffisant : dès qu'un
+     gestionnaire validait le don (ou le saisissait lui-même), il n'y
+     avait plus rien en attente et le mémo redemandait confirmation
+     plusieurs jours après → don déclaré en double.
+     On considère donc comme suivi d'effet TOUT don de ce joueur
+     enregistré après le lancement du tunnel, quel que soit son statut.
+     La marge de 5 min absorbe l'écart entre l'horloge du téléphone
+     (Date.now) et celle du serveur (declare_le). */
+  const donSuivi = dons.some(d => d.joueur_id === AUTH.id
+        && d.declare_le
+        && new Date(d.declare_le).getTime() > it.ts - 300000);
   if(it.joueur !== AUTH.id
-     || Date.now() - it.ts > 7*86400000
-     || dons.some(d=>d.joueur_id===AUTH.id && d.statut==="pending")){
+     || Date.now() - it.ts > 2*86400000
+     || donSuivi){
     oublierIntentionDon(); return;
   }
   donMontant = it.montant; donMoyen = it.moyen;
